@@ -557,6 +557,7 @@ h3 {
 }
 
 .portfolio-preview {
+  position: relative;
   min-height: 260px;
   display: flex;
   flex-direction: column;
@@ -627,7 +628,9 @@ h3 {
 
 .about-copy {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
   padding: 34px;
   border-left: 4px solid var(--teal);
   background: #fff;
@@ -741,13 +744,6 @@ h3 {
   padding: 30px 0;
   color: rgba(255, 255, 255, 0.68);
   background: var(--navy);
-}
-
-.footer-inner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
 }
 
 .footer-inner p {
@@ -924,5 +920,439 @@ h3 {
   .footer-inner {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .footer-right {
+    align-items: flex-start;
+  }
+}
+
+/* ── Portfolio enhancements ─────────────────────────────── */
+
+.portfolio-mockup {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 84px;
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.pm-bar {
+  height: 6px;
+  width: 55%;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.pm-hero-block {
+  height: 26px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.pm-line {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.pm-line--wide { width: 90%; }
+.pm-line--medium { width: 65%; }
+
+.pm-cta {
+  height: 12px;
+  width: 55%;
+  border-radius: 6px;
+  background: rgba(24, 182, 168, 0.6);
+  margin-top: 3px;
+}
+
+.pm-form-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pm-field {
+  height: 8px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.pm-field--tall {
+  height: 16px;
+}
+
+.pm-table-row {
+  height: 8px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.pm-table-row--header {
+  height: 10px;
+  background: rgba(255, 255, 255, 0.38);
+}
+
+.pm-table-row--muted {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.portfolio-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 14px;
+  color: var(--blue);
+  font-weight: 700;
+  font-size: 0.9rem;
+  transition: gap 160ms ease, color 160ms ease;
+}
+
+.portfolio-link:hover {
+  gap: 8px;
+  color: var(--teal);
+}
+
+/* ── Pricing section ────────────────────────────────────── */
+
+.pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.pricing-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 32px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(219, 228, 236, 0.88);
+  background: #fff;
+  box-shadow: var(--shadow);
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+.pricing-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 28px 82px rgba(7, 21, 36, 0.18);
+}
+
+.pricing-card--featured {
+  border-color: rgba(47, 128, 237, 0.38);
+  background:
+    linear-gradient(135deg, rgba(47, 128, 237, 0.04), rgba(24, 182, 168, 0.04)),
+    #fff;
+}
+
+.pricing-badge {
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 5px 14px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--blue), var(--teal));
+  color: #fff;
+  font-size: 0.76rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.pricing-top {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pricing-tier {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.pricing-price {
+  margin: 0;
+  font-size: 2.2rem;
+  font-weight: 800;
+  color: var(--ink);
+  line-height: 1.1;
+}
+
+.pricing-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.pricing-features {
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pricing-features li {
+  position: relative;
+  padding-left: 20px;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.pricing-features li::before {
+  content: "✓";
+  position: absolute;
+  left: 0;
+  color: var(--teal);
+  font-weight: 900;
+}
+
+/* ── About section expansion ────────────────────────────── */
+
+.about-photo-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 80px;
+  height: 80px;
+  margin-top: 28px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  border: 2px dashed rgba(255, 255, 255, 0.28);
+}
+
+.about-photo-placeholder svg {
+  width: 52px;
+  height: 52px;
+}
+
+/* Use this class once you add a real headshot: */
+.about-photo {
+  width: 80px;
+  height: 80px;
+  margin-top: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid rgba(255, 255, 255, 0.2);
+}
+
+.about-name {
+  margin: 0 0 4px;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.about-copy > p:not(.about-name) {
+  margin-bottom: 16px;
+}
+
+.about-skills {
+  margin: 4px 0 22px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.about-skills li {
+  position: relative;
+  padding-left: 20px;
+  color: var(--muted);
+  font-size: 1rem;
+}
+
+.about-skills li::before {
+  content: "→";
+  position: absolute;
+  left: 0;
+  color: var(--teal);
+  font-weight: 700;
+}
+
+.about-linkedin {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: #0a66c2;
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.9rem;
+  transition: opacity 160ms ease;
+}
+
+.about-linkedin:hover {
+  opacity: 0.86;
+}
+
+.about-linkedin svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+/* ── Footer expansion ───────────────────────────────────── */
+
+.footer-inner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 32px;
+}
+
+.footer-left {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.footer-brand {
+  margin: 0;
+  font-weight: 800;
+  color: #fff;
+  font-size: 1rem;
+}
+
+.footer-area {
+  margin: 0;
+  max-width: 400px;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.footer-email {
+  color: var(--teal);
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: opacity 160ms ease;
+}
+
+.footer-email:hover {
+  opacity: 0.8;
+}
+
+.footer-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.footer-social {
+  display: flex;
+  gap: 10px;
+}
+
+.footer-social a {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  transition: background 160ms ease, border-color 160ms ease;
+}
+
+.footer-social a:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+.footer-social svg {
+  width: 16px;
+  height: 16px;
+  fill: rgba(255, 255, 255, 0.72);
+}
+
+.footer-copy {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.footer-top {
+  font-size: 0.88rem;
+  transition: color 180ms ease;
+}
+
+.footer-top:hover {
+  color: #fff;
+}
+
+/* ── Form states ────────────────────────────────────────── */
+
+.form-status--success {
+  color: var(--teal);
+  font-weight: 600;
+}
+
+.form-status--error {
+  color: #e05252;
+}
+
+.button[disabled] {
+  opacity: 0.68;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* ── New section responsive overrides ───────────────────── */
+
+@media (max-width: 980px) {
+  .pricing-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .pricing-card--featured {
+    grid-column: 1 / -1;
+    max-width: 420px;
+    justify-self: center;
+    width: 100%;
+  }
+}
+
+@media (max-width: 700px) {
+  .pricing-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .pricing-card--featured {
+    grid-column: auto;
+    max-width: none;
+    justify-self: auto;
+  }
+
+  .pricing-card {
+    padding: 28px;
+  }
+
+  .footer-inner {
+    flex-direction: column;
+    gap: 28px;
+  }
+
+  .footer-right {
+    align-items: flex-start;
   }
 }
