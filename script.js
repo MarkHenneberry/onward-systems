@@ -68,7 +68,7 @@ if (contactForm && formStatus) {
       if (response.ok) {
         contactForm.reset();
         formStatus.textContent =
-          "Thanks — I'll take a look and follow up within 1–2 business days.";
+          "Thanks — I'll be in touch within 48 hours.";
         formStatus.classList.add("form-status--success");
       } else {
         formStatus.textContent =

@@ -234,12 +234,13 @@ h3 {
 
 .button-primary {
   color: #fff;
-  background: linear-gradient(135deg, var(--blue), var(--teal));
-  box-shadow: 0 16px 36px rgba(47, 128, 237, 0.24);
+  background: var(--teal);
+  box-shadow: 0 16px 36px rgba(24, 182, 168, 0.28);
 }
 
 .button-primary:hover {
-  box-shadow: 0 22px 44px rgba(47, 128, 237, 0.32);
+  background: #149e92;
+  box-shadow: 0 22px 44px rgba(24, 182, 168, 0.38);
 }
 
 .button-secondary {
@@ -498,7 +499,7 @@ h3 {
 .service-icon {
   display: inline-flex;
   margin-bottom: 22px;
-  color: var(--gold);
+  color: var(--teal);
   font-size: 0.82rem;
   font-weight: 900;
 }
@@ -583,22 +584,25 @@ h3 {
   font-size: 1.55rem;
 }
 
+/* Unsplash: contractor/home services — swap URL if desired */
 .portfolio-preview.landscaping {
   background:
-    linear-gradient(180deg, rgba(12, 24, 20, 0.16), rgba(12, 24, 20, 0.88)),
-    repeating-linear-gradient(135deg, #597b55 0 18px, #6f8f67 18px 36px);
+    linear-gradient(180deg, rgba(7, 21, 36, 0.12), rgba(7, 21, 36, 0.82)),
+    url("https://images.unsplash.com/photo-1621905251918-48416bd8575a?w=600") center / cover no-repeat;
 }
 
+/* Unsplash: landscaping/outdoor services — swap URL if desired */
 .portfolio-preview.sealing {
   background:
-    linear-gradient(180deg, rgba(17, 24, 39, 0.12), rgba(17, 24, 39, 0.9)),
-    linear-gradient(135deg, #242a33, #8d99a6);
+    linear-gradient(180deg, rgba(7, 21, 36, 0.12), rgba(7, 21, 36, 0.82)),
+    url("https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=600") center / cover no-repeat;
 }
 
+/* Unsplash: cleaning/general service — swap URL if desired */
 .portfolio-preview.roofing {
   background:
-    linear-gradient(180deg, rgba(26, 18, 16, 0.12), rgba(26, 18, 16, 0.88)),
-    repeating-linear-gradient(45deg, #7c564b 0 16px, #9a6a5d 16px 32px);
+    linear-gradient(180deg, rgba(7, 21, 36, 0.12), rgba(7, 21, 36, 0.82)),
+    url("https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=600") center / cover no-repeat;
 }
 
 .portfolio-body {
@@ -1062,7 +1066,7 @@ h3 {
   transform: translateX(-50%);
   padding: 5px 14px;
   border-radius: 999px;
-  background: linear-gradient(135deg, var(--blue), var(--teal));
+  background: var(--teal);
   color: #fff;
   font-size: 0.76rem;
   font-weight: 800;
@@ -1142,14 +1146,15 @@ h3 {
   height: 52px;
 }
 
-/* Use this class once you add a real headshot: */
 .about-photo {
-  width: 80px;
-  height: 80px;
+  width: 140px;
+  height: 140px;
   margin-top: 28px;
   border-radius: 50%;
   object-fit: cover;
-  border: 3px solid rgba(255, 255, 255, 0.2);
+  object-position: center top;
+  border: 3px solid rgba(255, 255, 255, 0.22);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
 .about-name {
@@ -1355,4 +1360,50 @@ h3 {
   .footer-right {
     align-items: flex-start;
   }
+}
+
+/* ── Nav logo ───────────────────────────────────────────── */
+
+.brand-logo {
+  height: 36px;
+  width: auto;
+  display: block;
+  border-radius: 8px;
+}
+
+/* ── Footer phone & legal links ─────────────────────────── */
+
+.footer-phone {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  height: 38px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.footer-phone:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+.footer-legal {
+  display: flex;
+  gap: 16px;
+  margin-top: 4px;
+}
+
+.footer-legal a {
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.46);
+  transition: color 160ms ease;
+}
+
+.footer-legal a:hover {
+  color: rgba(255, 255, 255, 0.72);
 }
