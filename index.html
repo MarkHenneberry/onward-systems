@@ -198,7 +198,10 @@
     section { position: relative; overflow: hidden; }
 
     /* Connector lines between steps on mobile */
+    .mobile-cta { display: none; }
+
     @media (max-width: 768px) {
+      .mobile-cta { display: inline-block; }
       .step-connector { display: none !important; }
       .hero-grid, .about-grid, .why-grid { grid-template-columns: 1fr !important; }
       .services-grid-2 { grid-template-columns: 1fr !important; }
@@ -215,6 +218,7 @@
 <nav id="navbar">
   <div style="max-width:1200px;margin:0 auto;padding:0 24px;display:flex;align-items:center;justify-content:space-between;">
     <a href="#"><img src="brand_assets/Logo.png" alt="Onward Systems" style="height:40px;display:block;"></a>
+    <a href="#contact" class="btn-primary mobile-cta" style="padding:10px 18px;font-size:13px;">Free Review</a>
     <div class="nav-links" style="display:flex;gap:28px;align-items:center;">
       <a href="#services" class="nav-link" style="color:rgba(232,236,244,0.7);font-size:14px;font-weight:500;text-decoration:none;transition:color 0.2s;">Services</a>
       <a href="#pricing" class="nav-link" style="color:rgba(232,236,244,0.7);font-size:14px;font-weight:500;text-decoration:none;transition:color 0.2s;">Pricing</a>
