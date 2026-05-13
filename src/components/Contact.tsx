@@ -39,7 +39,7 @@ export default function Contact() {
         setSubmitted(true);
       }
     } catch {
-      setError("Connection error. Please try again or email us directly at markhenneberry@outlook.com.");
+      setError("Connection error. Please try again or email us directly at markhenneberry@onwardsystems.ca.");
     } finally {
       setIsLoading(false);
     }

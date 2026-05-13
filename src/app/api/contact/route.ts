@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { Resend } from "resend";
 
 const FROM = process.env.RESEND_FROM ?? "onboarding@resend.dev";
-const OWNER = "markhenneberry@outlook.com";
+const OWNER = "markhenneberry@onwardsystems.ca";
 
 export async function POST(req: Request) {
   const resend = new Resend(process.env.RESEND_API_KEY);
@@ -93,7 +93,7 @@ export async function POST(req: Request) {
   } catch (err) {
     console.error("Contact form error:", err);
     return NextResponse.json(
-      { error: "Something went wrong. Please try again or email directly at markhenneberry@outlook.com." },
+      { error: "Something went wrong. Please try again or email directly at markhenneberry@onwardsystems.ca." },
       { status: 500 }
     );
   }

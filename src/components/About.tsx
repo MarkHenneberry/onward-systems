@@ -77,13 +77,13 @@ export default function About() {
                 <span className="text-sm font-medium">902-718-9304</span>
               </a>
               <a
-                href="mailto:markhenneberry@outlook.com"
+                href="mailto:markhenneberry@onwardsystems.ca"
                 className="flex items-center gap-3 text-slate-600 hover:text-blue-600 transition-colors group"
               >
                 <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center group-hover:bg-blue-100 transition-colors">
                   <Mail size={15} className="text-blue-600" />
                 </div>
-                <span className="text-sm font-medium">markhenneberry@outlook.com</span>
+                <span className="text-sm font-medium">markhenneberry@onwardsystems.ca</span>
               </a>
               <div className="flex items-center gap-3 text-slate-600">
                 <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center">

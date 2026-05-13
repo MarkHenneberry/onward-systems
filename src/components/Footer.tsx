@@ -66,11 +66,11 @@ export default function Footer() {
                 902-718-9304
               </a>
               <a
-                href="mailto:markhenneberry@outlook.com"
+                href="mailto:markhenneberry@onwardsystems.ca"
                 className="flex items-center gap-2.5 text-sm text-blue-200/60 hover:text-white transition-colors"
               >
                 <Mail size={14} className="text-blue-400 shrink-0" />
-                markhenneberry@outlook.com
+                markhenneberry@onwardsystems.ca
               </a>
               <div className="flex items-center gap-2.5 text-sm text-blue-200/60">
                 <MapPin size={14} className="text-blue-400 shrink-0" />
