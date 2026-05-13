@@ -1,10 +1,9 @@
-import { ArrowRight, Search, AlertCircle, Zap, Map } from "lucide-react";
+import { ArrowRight, Search, AlertCircle, Map } from "lucide-react";
 
 const deliverables = [
-  { icon: Search, text: "Where your online presence has gaps" },
-  { icon: AlertCircle, text: "Where you might be losing leads without realizing it" },
-  { icon: Zap, text: "Where repetitive tasks could be automated" },
-  { icon: Map, text: "Clear next steps — no fluff" },
+  { icon: Search, text: "Gaps in your online presence" },
+  { icon: AlertCircle, text: "Where leads or follow-ups might be falling through" },
+  { icon: Map, text: "Practical next steps, no fluff" },
 ];
 
 export default function FreeReview() {
@@ -47,6 +46,9 @@ export default function FreeReview() {
               Request your free review
               <ArrowRight size={18} />
             </a>
+            <p className="mt-4 text-sm text-blue-300/50">
+              No spam. No pressure. Just a conversation about where things stand.
+            </p>
           </div>
 
           {/* Right: Visual card */}
@@ -65,9 +67,8 @@ export default function FreeReview() {
               <div className="space-y-3">
                 {[
                   "Online presence gaps identified",
-                  "Lead flow analysis",
-                  "Automation opportunities noted",
-                  "Specific next steps provided",
+                  "Lead and follow-up issues noted",
+                  "Practical next steps provided",
                 ].map((item, i) => (
                   <div
                     key={i}

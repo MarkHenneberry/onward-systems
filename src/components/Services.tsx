@@ -1,11 +1,11 @@
-import { Monitor, ClipboardList, Zap, Settings, ArrowRight } from "lucide-react";
+import { Monitor, ClipboardList, MessageSquare, Settings, ArrowRight } from "lucide-react";
 
 const services = [
   {
     icon: Monitor,
     title: "Custom Website",
     tag: "Foundation",
-    body: "A professional website built around your services, service area, customer journey, and brand. Fast, mobile-first, and built to convert visitors into leads.",
+    body: "A professional site built around your services, service area, and the way customers find you. Fast, mobile-first, and built to turn visitors into quote requests.",
     features: [
       "Service and location pages",
       "Contact and quote form",
@@ -18,7 +18,7 @@ const services = [
     icon: ClipboardList,
     title: "Lead Intake System",
     tag: "Intake",
-    body: "Quote forms, request forms, email notifications, customer confirmations, and lead routing — all wired together so nothing slips through.",
+    body: "Quote forms, request flows, email notifications, and customer confirmations all wired together. Every request gets captured and sent where it needs to go.",
     features: [
       "Custom quote & request forms",
       "Auto-confirmations to customers",
@@ -28,14 +28,14 @@ const services = [
     href: "#contact",
   },
   {
-    icon: Zap,
-    title: "Workflow Buildout",
-    tag: "Automation",
-    body: "Simple automations that reduce repetitive admin work and help prevent leads from going cold. Built around the tools you already use.",
+    icon: MessageSquare,
+    title: "Lead & Admin System",
+    tag: "Operations",
+    body: "Practical tools that reduce repetitive admin work, help follow up with leads, and keep customer communication organized. Built around the tools you already use.",
     features: [
       "Scoping call included",
+      "Follow-up and reply tools",
       "Integration with existing tools",
-      "Follow-up automations",
       "Handoff or managed setup",
     ],
     href: "#contact",
@@ -44,11 +44,11 @@ const services = [
     icon: Settings,
     title: "Managed Systems",
     tag: "Ongoing",
-    body: "Ongoing support, updates, hosting, maintenance, and automation monitoring. The systems keep running without you thinking about it.",
+    body: "Ongoing support, hosting, updates, and monitoring so everything keeps running without you having to think about it.",
     features: [
-      "Workflow monitoring",
-      "Updates as needed",
-      "Hosting & API costs handled",
+      "Monitoring and updates",
+      "Hosting & third-party costs handled",
+      "Changes as your business grows",
       "Monthly check-in",
     ],
     href: "#pricing",
@@ -66,8 +66,9 @@ export default function Services() {
             What we build.
           </h2>
           <p className="text-lg text-slate-600 leading-relaxed">
-            Each service is scoped to your operation and delivered in plain language.
-            No jargon, no bloated proposals, no ongoing costs you didn&rsquo;t ask for.
+            Each service is scoped to your operation. We help local service businesses capture
+            leads, organize customer communication, reduce repetitive admin, and improve
+            day-to-day operations. No jargon, no bloated proposals.
           </p>
         </div>
 

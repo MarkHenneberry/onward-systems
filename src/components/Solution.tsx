@@ -4,28 +4,28 @@ const layers = [
   {
     number: "01",
     icon: Monitor,
-    title: "Website Foundation",
+    title: "Clear Online Presence",
     subtitle: "Your online home base",
-    body: "A clean, fast, mobile-first website that explains what you do, where you work, and how people can reach you. Built around your services, your service area, and your customers — not a generic template.",
+    body: "A clear, mobile-friendly site that explains what you do, where you work, and how customers can reach you. Built around your services and service area, not a generic template.",
     highlights: ["Mobile-first design", "Clear service pages", "Contact & quote forms", "Google Business guidance"],
     color: "blue",
   },
   {
     number: "02",
     icon: ClipboardList,
-    title: "Lead Intake System",
+    title: "Better Lead Capture",
     subtitle: "Capture every opportunity",
-    body: "Forms and flows that collect the right details from potential customers, send them to the right place, and confirm the request automatically. No lead falls through because of a missed message.",
+    body: "Cleaner quote forms and contact flows that collect the right details from customers and send them where they need to go. No lead falls through a missed message.",
     highlights: ["Quote & request forms", "Email notifications", "Customer confirmations", "Lead routing"],
     color: "indigo",
   },
   {
     number: "03",
     icon: Zap,
-    title: "Workflow Automation",
-    subtitle: "Get your time back",
-    body: "Simple automations that reduce repetitive admin work, help follow up with leads, and keep opportunities from going cold. Built for how your business actually runs.",
-    highlights: ["Auto-replies & follow-ups", "Lead tracking", "Scheduling triggers", "CRM integration"],
+    title: "Organized Follow-up",
+    subtitle: "Reduce the daily back-and-forth",
+    body: "Simple tools that help cut down on missed leads, repetitive replies, and scattered customer communication. Built around how your operation actually runs.",
+    highlights: ["Auto-replies & follow-ups", "Lead tracking", "Scheduling triggers", "Inbox organization"],
     color: "violet",
   },
 ];
@@ -65,8 +65,8 @@ export default function Solution() {
             Systems built around how your business actually works.
           </h2>
           <p className="text-lg text-slate-600 leading-relaxed">
-            Every engagement starts with understanding your operation. Then we build the right layer —
-            or all three — depending on where you are right now.
+            Every project starts with understanding how your business actually runs. Then we build
+            the right piece, or all three, depending on where you are right now.
           </p>
         </div>
 

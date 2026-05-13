@@ -4,17 +4,17 @@ const problems = [
   {
     icon: Globe,
     title: "No clear online home",
-    body: "Customers land on an outdated page, an incomplete Google listing, or nothing at all. First impressions that should be building trust are working against you instead.",
+    body: "Customers bounce between Facebook pages, old listings, and outdated websites trying to figure out if you're active and how to contact you.",
   },
   {
     icon: Inbox,
     title: "Leads slip through",
-    body: "Quote requests, follow-ups, and messages are scattered across Facebook, email, phone, and texts. Good opportunities get missed simply because there's no system.",
+    body: "Quote requests, follow-ups, and customer messages get scattered across Facebook, email, phone calls, and texts. Some never get answered.",
   },
   {
     icon: Clock,
     title: "Admin eats your time",
-    body: "You repeat the same replies, chase the same follow-ups, and manually handle work that could be systemized. Time that should go into the job goes into the inbox.",
+    body: "Following up on quote requests, answering the same questions, and manually organizing messages can quietly eat hours every week.",
   },
 ];
 
@@ -29,8 +29,9 @@ export default function Problem() {
             The basics are often scattered.
           </h2>
           <p className="text-lg text-slate-600 leading-relaxed">
-            A lot of good businesses lose time, trust, and money because the basics are spread across
-            old pages, social profiles, inboxes, and texts.
+            A lot of good businesses in Halifax and HRM lose leads and time because the basics are
+            split across old pages, social profiles, inboxes, and texts with nothing tying them
+            together.
           </p>
         </div>
 

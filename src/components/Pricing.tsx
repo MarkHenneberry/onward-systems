@@ -3,25 +3,23 @@ import { Check, ArrowRight } from "lucide-react";
 type PricingTier = {
   name: string;
   price: string;
-  priceNote?: string;
-  tag?: string;
-  tagColor?: string;
   description: string;
   features: string[];
   cta: string;
   ctaHref: string;
   highlight?: boolean;
+  tag?: string;
 };
 
 const tiers: PricingTier[] = [
   {
-    name: "Free Systems Review",
+    name: "Free Review",
     price: "$0",
     description: "A clear look at where things stand.",
     features: [
       "Online presence gaps identified",
-      "Workflow & automation opportunities",
-      "Specific next steps",
+      "Lead and follow-up issues noted",
+      "Practical next steps",
       "Delivered within 1–2 business days",
     ],
     cta: "Request free review",
@@ -30,59 +28,45 @@ const tiers: PricingTier[] = [
   {
     name: "Website Foundation",
     price: "From $250",
-    description: "Custom site that works on every device.",
+    description: "A professional site built for your trade.",
     features: [
       "Mobile-first design",
       "Contact or quote form included",
       "Google Business setup guidance",
-      "You handle hosting: $250 one-time",
-      "We handle everything: $100 + $25/mo",
+      "Self-hosted: $250 one-time",
+      "Fully managed: $100 + $25/mo",
     ],
     cta: "Get started",
     ctaHref: "#contact",
   },
   {
-    name: "Workflow Buildout",
+    name: "Lead & Admin System",
     price: "From $500",
-    description: "Fix what's leaking time and money.",
+    description: "Fix what's leaking leads and time.",
     features: [
-      "Scoping call",
-      "Integration with existing tools",
+      "Scoping call included",
+      "Quote forms and lead routing",
       "Customer confirmations",
-      "Follow-up automations",
+      "Follow-up tools",
       "Handoff or managed setup",
     ],
     cta: "Get started",
     ctaHref: "#contact",
     highlight: true,
     tag: "Most requested",
-    tagColor: "blue",
   },
   {
-    name: "Systems Package",
+    name: "Full Systems Package",
     price: "From $1,500",
-    description: "Website, intake flow, and automation built together.",
+    description: "Website, intake, and operations built together.",
     features: [
       "Custom website",
-      "Lead intake system",
-      "Tracking setup",
-      "Core workflow automation",
+      "Lead intake setup",
+      "Customer communication tools",
+      "Core admin tooling",
       "Scoped to your business",
     ],
     cta: "Get started",
-    ctaHref: "#contact",
-  },
-  {
-    name: "Managed Retainer",
-    price: "From $300/mo",
-    description: "Keep systems running without thinking about it.",
-    features: [
-      "Workflow monitoring",
-      "Updates as needed",
-      "Hosting & API costs handled (if applicable)",
-      "Monthly check-in",
-    ],
-    cta: "Learn more",
     ctaHref: "#contact",
   },
 ];
@@ -98,19 +82,38 @@ export default function Pricing() {
             Simple, honest pricing.
           </h2>
           <p className="text-lg text-slate-600 leading-relaxed">
-            No surprises. No retainers you didn&rsquo;t ask for. Every project is scoped before
-            any work begins.
+            No surprises. No retainers you didn&rsquo;t ask for. Every project is scoped
+            before any work begins.
           </p>
         </div>
 
         {/* Grid */}
-        <div className="mt-12 grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div className="mt-12 grid md:grid-cols-2 lg:grid-cols-4 gap-5">
           {tiers.map((tier) => (
             <PricingCard key={tier.name} tier={tier} />
           ))}
         </div>
 
-        <p className="text-center text-sm text-slate-400 mt-10">
+        {/* Managed Retainer — secondary/optional */}
+        <div className="mt-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white border border-slate-100 rounded-2xl px-6 py-4">
+          <div>
+            <span className="text-sm font-semibold text-[#0f1c40]">Managed Retainer</span>
+            <span className="text-slate-400 text-sm mx-2">&middot;</span>
+            <span className="text-sm text-slate-500">From $300/mo</span>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Hosting, monitoring, updates, and a monthly check-in so everything keeps running.
+            </p>
+          </div>
+          <a
+            href="#contact"
+            className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-700 transition-colors shrink-0"
+          >
+            Ask about this
+            <ArrowRight size={13} />
+          </a>
+        </div>
+
+        <p className="text-center text-sm text-slate-400 mt-8">
           All projects are scoped before any work begins. Prices are starting points, not maximums.
         </p>
       </div>

@@ -11,8 +11,10 @@ export default function Hero() {
       <div className="absolute inset-0 z-[1] [mask-image:radial-gradient(ellipse_60%_70%_at_50%_50%,transparent_30%,black_100%)] bg-[#0f1c40] pointer-events-none" />
 
       {/* Soft blue glow top-right */}
-      <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-blue-600/10 rounded-full blur-3xl pointer-events-none z-[2]" />
-      <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-blue-500/8 rounded-full blur-3xl pointer-events-none z-[2]" />
+      <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-blue-600/15 rounded-full blur-3xl pointer-events-none z-[2]" />
+      <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-blue-500/10 rounded-full blur-3xl pointer-events-none z-[2]" />
+      {/* Faint center glow behind content */}
+      <div className="absolute top-1/2 left-1/4 -translate-y-1/2 w-[500px] h-[400px] bg-blue-400/5 rounded-full blur-3xl pointer-events-none z-[2]" />
 
       <div className="relative z-10 max-w-6xl mx-auto px-6 md:px-10 pt-24 pb-16 lg:pt-28 lg:pb-20 w-full" style={{ zIndex: 10 }}>
         <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
@@ -29,10 +31,13 @@ export default function Hero() {
               <span className="text-blue-400">move forward.</span>
             </h1>
 
-            <p className="text-lg text-blue-100/75 leading-relaxed mb-10 max-w-lg">
-              Onward Systems builds custom websites, lead intake systems, and practical
-              automations for local service businesses across Halifax and HRM&mdash;so the
-              online side of your operation runs the way the rest of it does.
+            <p className="text-lg text-blue-100/75 leading-[1.75] mb-10 max-w-lg">
+              Onward Systems builds websites and practical business tools for local service
+              companies across Halifax and HRM.
+              <span className="block mt-3">
+                From cleaner lead intake and customer communication to AI-assisted admin
+                tools, everything is built to help your business run more smoothly.
+              </span>
             </p>
 
             <div className="flex flex-wrap gap-3 mb-10">
@@ -93,7 +98,7 @@ function HeroDashboard() {
   return (
     <div className="w-full max-w-sm mx-auto lg:mx-0">
       {/* Outer card */}
-      <div className="bg-white/6 backdrop-blur-sm border border-white/10 rounded-2xl p-4 shadow-2xl">
+      <div className="bg-white/8 backdrop-blur-md border border-white/15 rounded-2xl p-4 shadow-2xl ring-1 ring-white/5">
         {/* Header bar */}
         <div className="flex items-center justify-between mb-4 px-1">
           <span className="text-xs font-semibold text-white/50 uppercase tracking-widest">Lead System</span>

@@ -2,10 +2,10 @@ import Image from "next/image";
 import { Phone, Mail, MapPin, Check } from "lucide-react";
 
 const bullets = [
-  "Built for service businesses",
+  "Built for Halifax service businesses",
   "No jargon, no fluff",
-  "Local to Halifax/HRM",
-  "Practical systems, not vague marketing",
+  "Serving Halifax, Dartmouth, and HRM",
+  "Real systems, not vague marketing",
 ];
 
 export default function About() {
@@ -42,14 +42,15 @@ export default function About() {
             </h2>
 
             <p className="text-slate-600 leading-relaxed mb-4">
-              I started Onward Systems to help local service businesses in Halifax and HRM improve
-              the practical systems that keep their operation running: websites, contact flows, lead
-              tracking, and automation that cuts repetitive admin work.
+              I started Onward Systems to help local service businesses in Halifax, Dartmouth, and
+              across HRM improve the systems that keep their operation running: websites, lead
+              intake, contact flows, and automations that cut repetitive admin work.
             </p>
             <p className="text-slate-600 leading-relaxed mb-8">
-              The work is custom-built, not templated. Every system is built around how your business
-              actually works, not a generic version of it. Everything is explained in plain language
-              with no unnecessary complexity.
+              Every project is built around how your business actually runs, not a generic
+              version of it. Where useful, that includes tools that reduce time spent on
+              communication, follow-up, and admin. Everything is explained in plain language
+              with no unnecessary complexity and no costs you didn&rsquo;t agree to.
             </p>
 
             {/* Feature bullets */}

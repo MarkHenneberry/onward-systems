@@ -21,7 +21,7 @@ const examples: Example[] = [
     title: "Roofing Lead System",
     subtitle: "Built for roofing and exterior companies",
     description:
-      "Inspection request form, emergency repair CTA, project gallery, storm damage section, service areas, and quote intake.",
+      "Built to capture inspection requests, emergency repair leads, and project inquiries. Includes storm damage landing, quote intake, project gallery, and service area pages.",
     url: "https://roofing-mock.vercel.app/",
     systems: ["Quote intake form", "Emergency repair CTA", "Storm damage landing", "Project gallery", "Service area pages"],
     tags: ["Lead intake", "Quote forms", "Mobile-first", "Service area SEO"],
@@ -32,7 +32,7 @@ const examples: Example[] = [
     title: "HVAC Service Website",
     subtitle: "Built for HVAC and mechanical service companies",
     description:
-      "Emergency service CTA, maintenance plan section, service request form, financing section, and lead capture flow.",
+      "Built around service calls, emergency requests, maintenance plans, and customer intake. Includes service request form, maintenance plan page, and lead capture flow.",
     url: "https://hvac-mock.vercel.app/",
     systems: ["Emergency service CTA", "Maintenance plan page", "Service request form", "Financing section", "Lead capture flow"],
     tags: ["Lead intake", "Emergency CTA", "Service requests", "Mobile-first"],
@@ -43,7 +43,7 @@ const examples: Example[] = [
     title: "General Contractor Website",
     subtitle: "Built for general contractors and renovation companies",
     description:
-      "Project gallery, quote qualification form, service area section, before/after showcase, and trust-building layout.",
+      "Built to qualify project requests, show completed work, and make quote requests easier to manage. Includes project gallery, before/after showcase, and service area section.",
     url: "https://general-contractor-mock.vercel.app/",
     systems: ["Project gallery", "Quote qualification form", "Service area section", "Before/after showcase", "Trust-building layout"],
     tags: ["Quote forms", "Project gallery", "Service areas", "Mobile-first"],
@@ -121,8 +121,9 @@ export default function ExampleSystems() {
             Built for local service businesses.
           </h2>
           <p className="text-lg text-slate-600 leading-relaxed">
-            Here&rsquo;s what a complete system looks like for a few common business types.
-            Click any example to preview the live site.
+            Each of these is a live site built around a specific trade business type. Lead
+            intake, service area pages, emergency CTAs, and project galleries all included.
+            Click any card to preview it.
           </p>
         </div>
 
@@ -147,6 +148,9 @@ export default function ExampleSystems() {
                     <div className="flex-1 mx-2 h-4 bg-white/10 rounded-md flex items-center px-2">
                       <span className="text-[9px] text-white/35 truncate">{ex.url}</span>
                     </div>
+                    <span className="text-[9px] font-semibold text-white/60 bg-white/10 px-2 py-0.5 rounded-full shrink-0">
+                      Live demo
+                    </span>
                   </div>
                   {/* Icon area */}
                   <div className="flex-1 flex items-center justify-center">
@@ -193,9 +197,9 @@ export default function ExampleSystems() {
                   {/* CTA */}
                   <button
                     onClick={(e) => { e.stopPropagation(); open(ex); }}
-                    className="inline-flex items-center justify-center gap-2 w-full text-sm font-semibold text-blue-600 hover:text-blue-700 border border-blue-100 hover:border-blue-300 bg-blue-50 hover:bg-blue-100 py-2.5 rounded-xl transition-all duration-200"
+                    className="inline-flex items-center justify-center gap-2 w-full text-sm font-semibold text-blue-600 hover:text-blue-700 border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 hover:shadow-sm py-3 rounded-xl transition-all duration-200"
                   >
-                    View example
+                    View live demo
                     <ArrowRight size={14} />
                   </button>
                 </div>
@@ -227,7 +231,7 @@ export default function ExampleSystems() {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.96, y: 16 }}
               transition={{ type: "spring", stiffness: 320, damping: 30 }}
-              className="fixed inset-x-4 inset-y-4 md:inset-x-6 md:inset-y-6 lg:inset-x-12 lg:inset-y-8 z-50 bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+              className="fixed inset-x-3 inset-y-3 md:inset-x-6 md:inset-y-6 lg:inset-x-12 lg:inset-y-8 z-50 bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Modal header */}

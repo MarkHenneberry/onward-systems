@@ -5,19 +5,19 @@ const steps = [
     number: "1",
     icon: Search,
     title: "Free systems review",
-    body: "Send over what you have. I look at your online presence and how your operation currently handles leads and jobs — then send back a plain-language breakdown of where things stand.",
+    body: "Send over what you have. I look at your online presence and how you currently handle leads, then send back a plain-language breakdown of where things stand.",
   },
   {
     number: "2",
     icon: Wrench,
     title: "Fix the right things first",
-    body: "Start with whatever matters most right now: a new website, a cleaner contact flow, or a workflow that stops leads from going cold. No bloated scope, no unnecessary complexity.",
+    body: "Start with what matters most: a new website, a cleaner contact flow, or something to stop leads from going cold. No bloated scope.",
   },
   {
     number: "3",
     icon: TrendingUp,
     title: "Build from there",
-    body: "As the business grows, the systems grow with it. More automation, better intake, cleaner tracking — added when the time is right, not forced all at once.",
+    body: "As the business grows, the tools grow with it. Better intake, cleaner tracking, more follow-up added when the time is right.",
   },
 ];
 
@@ -68,7 +68,7 @@ export default function HowItWorks() {
             Ready to see where things stand?
           </h3>
           <p className="text-slate-600 mb-6">
-            The free systems review is the starting point. No commitment, no pitch — just a clear
+            The free review is the starting point. No commitment, no pitch. Just a clear
             picture of what&rsquo;s working and what isn&rsquo;t.
           </p>
           <a href="#contact" className="btn-primary text-base px-8 py-3.5 inline-flex">
