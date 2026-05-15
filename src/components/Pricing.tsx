@@ -3,6 +3,7 @@ import { Check, ArrowRight } from "lucide-react";
 type PricingTier = {
   name: string;
   price: string;
+  priceSub?: string;
   description: string;
   features: string[];
   cta: string;
@@ -13,60 +14,65 @@ type PricingTier = {
 
 const tiers: PricingTier[] = [
   {
-    name: "Free Review",
+    name: "Free Systems Review",
     price: "$0",
     description: "A clear look at where things stand.",
     features: [
       "Online presence gaps identified",
       "Lead and follow-up issues noted",
       "Practical next steps",
-      "Delivered within 1–2 business days",
+      "Delivered within 1 to 2 business days",
     ],
-    cta: "Request free review",
+    cta: "Request Free Review",
     ctaHref: "#contact",
   },
   {
     name: "Website Foundation",
-    price: "From $250",
-    description: "A professional site built for your trade.",
+    price: "$99",
+    priceSub: "setup + $10/mo",
+    description: "A simple online presence for local service businesses.",
     features: [
-      "Mobile-first design",
-      "Contact or quote form included",
-      "Google Business setup guidance",
-      "Self-hosted: $250 one-time",
-      "Fully managed: $100 + $25/mo",
+      "Mobile-friendly website",
+      "Hosting and maintenance",
+      "Contact form",
+      "Basic SEO setup",
+      "Domain connection support",
     ],
-    cta: "Get started",
+    cta: "Start With Website",
     ctaHref: "#contact",
   },
   {
     name: "Lead & Admin System",
-    price: "From $500",
-    description: "Fix what's leaking leads and time.",
+    price: "$199",
+    priceSub: "setup + $50/mo",
+    description: "Lead handling and customer communication built into your website.",
     features: [
-      "Scoping call included",
-      "Quote forms and lead routing",
-      "Customer confirmations",
-      "Follow-up tools",
-      "Handoff or managed setup",
+      "Everything in Website Foundation",
+      "Lead storage system",
+      "Email notifications",
+      "Customer auto-replies",
+      "Urgency tagging",
+      "Simple admin organization",
     ],
-    cta: "Get started",
+    cta: "Build Lead System",
     ctaHref: "#contact",
     highlight: true,
     tag: "Most requested",
   },
   {
     name: "Full Systems Package",
-    price: "From $1,500",
-    description: "Website, intake, and operations built together.",
+    price: "From $499",
+    priceSub: "setup + $75/mo",
+    description: "Custom systems built around how your business actually operates.",
     features: [
-      "Custom website",
-      "Lead intake setup",
-      "Customer communication tools",
-      "Core admin tooling",
-      "Scoped to your business",
+      "Custom website structure",
+      "Advanced intake and workflow setup",
+      "Operational organization tools",
+      "Customer communication systems",
+      "AI-assisted follow-ups and lead handling",
+      "Scoped automations tailored to your business",
     ],
-    cta: "Get started",
+    cta: "Plan Full System",
     ctaHref: "#contact",
   },
 ];
@@ -76,45 +82,28 @@ export default function Pricing() {
     <section className="section-pad bg-[#f8f7f4]" id="pricing">
       <div className="container-max">
         {/* Header */}
-        <div className="max-w-2xl mb-4">
+        <div className="max-w-2xl mb-12">
           <p className="section-eyebrow">Pricing</p>
           <h2 className="text-3xl md:text-4xl font-bold text-[#0f1c40] mb-4">
             Simple, honest pricing.
           </h2>
           <p className="text-lg text-slate-600 leading-relaxed">
-            No surprises. No retainers you didn&rsquo;t ask for. Every project is scoped
-            before any work begins.
+            No surprises. Every project is scoped before any work begins. Monthly fees cover
+            hosting, maintenance, monitoring, and ongoing system support.
           </p>
         </div>
 
         {/* Grid */}
-        <div className="mt-12 grid md:grid-cols-2 lg:grid-cols-4 gap-5">
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5">
           {tiers.map((tier) => (
             <PricingCard key={tier.name} tier={tier} />
           ))}
         </div>
 
-        {/* Managed Retainer — secondary/optional */}
-        <div className="mt-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white border border-slate-100 rounded-2xl px-6 py-4">
-          <div>
-            <span className="text-sm font-semibold text-[#0f1c40]">Managed Retainer</span>
-            <span className="text-slate-400 text-sm mx-2">&middot;</span>
-            <span className="text-sm text-slate-500">From $300/mo</span>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Hosting, monitoring, updates, and a monthly check-in so everything keeps running.
-            </p>
-          </div>
-          <a
-            href="#contact"
-            className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-700 transition-colors shrink-0"
-          >
-            Ask about this
-            <ArrowRight size={13} />
-          </a>
-        </div>
-
-        <p className="text-center text-sm text-slate-400 mt-8">
-          All projects are scoped before any work begins. Prices are starting points, not maximums.
+        {/* Supporting note */}
+        <p className="text-center text-sm text-slate-400 mt-8 max-w-2xl mx-auto leading-relaxed">
+          All pricing reflects common starting points for local service businesses. Final scope
+          depends on the business, the systems needed, and how much ongoing support is required.
         </p>
       </div>
     </section>
@@ -140,18 +129,29 @@ function PricingCard({ tier }: { tier: PricingTier }) {
 
       <div className="mb-5">
         <h3
-          className={`text-base font-semibold mb-1 ${
+          className={`text-base font-semibold mb-2 ${
             tier.highlight ? "text-white" : "text-[#0f1c40]"
           }`}
         >
           {tier.name}
         </h3>
-        <div
-          className={`text-3xl font-bold mb-1 ${
-            tier.highlight ? "text-white" : "text-[#0f1c40]"
-          }`}
-        >
-          {tier.price}
+        <div className="mb-1">
+          <span
+            className={`text-3xl font-bold ${
+              tier.highlight ? "text-white" : "text-[#0f1c40]"
+            }`}
+          >
+            {tier.price}
+          </span>
+          {tier.priceSub && (
+            <span
+              className={`text-sm ml-1.5 ${
+                tier.highlight ? "text-blue-300/70" : "text-slate-400"
+              }`}
+            >
+              {tier.priceSub}
+            </span>
+          )}
         </div>
         <p
           className={`text-sm leading-snug ${
