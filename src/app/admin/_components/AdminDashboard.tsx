@@ -11,6 +11,7 @@ import {
   Calendar,
   Mail,
   Phone,
+  MessageSquare,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -41,6 +42,15 @@ type LeadNote = {
   created_at: string;
 };
 
+type Message = {
+  id: string;
+  lead_id: string;
+  channel: string;
+  direction: string;
+  body: string;
+  created_at: string;
+};
+
 const STATUS_OPTIONS = [
   "new",
   "contacted",
@@ -67,6 +77,39 @@ const STATUS_COLORS: Record<Status, string> = {
   booked: "bg-green-100 text-green-700",
   completed: "bg-slate-100 text-slate-600",
   lost: "bg-red-100 text-red-600",
+};
+
+const SOURCE_OPTIONS = [
+  "website", "facebook", "phone", "text", "email", "referral", "manual", "other",
+] as const;
+type Source = (typeof SOURCE_OPTIONS)[number];
+
+const SOURCE_LABELS: Record<Source, string> = {
+  website: "Website",
+  facebook: "Facebook",
+  phone: "Phone",
+  text: "Text",
+  email: "Email",
+  referral: "Referral",
+  manual: "Manual",
+  other: "Other",
+};
+
+const SOURCE_COLORS: Record<Source, string> = {
+  website: "bg-blue-100 text-blue-700",
+  facebook: "bg-indigo-100 text-indigo-700",
+  phone: "bg-green-100 text-green-700",
+  text: "bg-emerald-100 text-emerald-700",
+  email: "bg-amber-100 text-amber-700",
+  referral: "bg-purple-100 text-purple-700",
+  manual: "bg-slate-100 text-slate-600",
+  other: "bg-gray-100 text-gray-600",
+};
+
+const DIRECTION_LABELS: Record<string, string> = {
+  inbound: "Inbound",
+  outbound: "Outbound",
+  internal: "Internal",
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -198,6 +241,17 @@ function UrgencyBadge({ urgency }: { urgency: string }) {
   );
 }
 
+function SourceBadge({ source }: { source: string | null }) {
+  if (!source) return null;
+  const color = SOURCE_COLORS[source as Source] ?? "bg-gray-100 text-gray-600";
+  const label = SOURCE_LABELS[source as Source] ?? source;
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${color}`}>
+      {label}
+    </span>
+  );
+}
+
 function InfoRow({
   label,
   value,
@@ -237,12 +291,37 @@ export default function AdminDashboard({
   const [noteHistory, setNoteHistory] = useState<LeadNote[]>([]);
   const [notesLoading, setNotesLoading] = useState(false);
 
+  // Messages state
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [messageDraft, setMessageDraft] = useState({ channel: "manual", direction: "inbound", body: "" });
+  const [messageSaving, setMessageSaving] = useState(false);
+
+  // Add Lead modal state
+  const [showAddLead, setShowAddLead] = useState(false);
+  const [addLeadSaving, setAddLeadSaving] = useState(false);
+  const [addLeadForm, setAddLeadForm] = useState({
+    name: "",
+    business_name: "",
+    email: "",
+    phone: "",
+    website_or_facebook: "",
+    business_type: "",
+    help_needed: "",
+    message: "",
+    source: "manual",
+    urgency: "normal" as "emergency" | "normal",
+    status: "new" as Lead["status"],
+  });
+
   const selectedLead = leads.find((l) => l.id === selectedId) ?? null;
 
-  // Fetch note history whenever a different lead is selected
+  // Fetch notes and messages whenever a different lead is selected
   useEffect(() => {
     setNoteDraft("");
     setNoteHistory([]);
+    setMessages([]);
+    setMessageDraft({ channel: "manual", direction: "inbound", body: "" });
 
     if (!selectedId) return;
 
@@ -252,6 +331,13 @@ export default function AdminDashboard({
       .then(({ data }) => setNoteHistory(data ?? []))
       .catch((err) => console.error("[admin] failed to load notes:", err))
       .finally(() => setNotesLoading(false));
+
+    setMessagesLoading(true);
+    fetch(`/api/admin/leads/${selectedId}/messages`)
+      .then((r) => r.json())
+      .then(({ data }) => setMessages(data ?? []))
+      .catch((err) => console.error("[admin] failed to load messages:", err))
+      .finally(() => setMessagesLoading(false));
   }, [selectedId]);
 
   // Overview stats
@@ -328,6 +414,69 @@ export default function AdminDashboard({
     }
   }
 
+  async function handleSaveMessage() {
+    if (!selectedId || !messageDraft.body.trim()) return;
+    setMessageSaving(true);
+    try {
+      const res = await fetch(`/api/admin/leads/${selectedId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channel: messageDraft.channel,
+          direction: messageDraft.direction,
+          body: messageDraft.body.trim(),
+        }),
+      });
+      if (res.ok) {
+        const { data } = await res.json();
+        setMessages((prev) => [...prev, data]);
+        setMessageDraft({ channel: "manual", direction: "inbound", body: "" });
+      } else {
+        console.error("[admin] save message failed:", await res.text());
+      }
+    } catch (err) {
+      console.error("[admin] save message error:", err);
+    } finally {
+      setMessageSaving(false);
+    }
+  }
+
+  async function handleAddLead() {
+    if (!addLeadForm.name.trim() || !addLeadForm.email.trim()) return;
+    setAddLeadSaving(true);
+    try {
+      const res = await fetch("/api/admin/leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(addLeadForm),
+      });
+      if (res.ok) {
+        const { data } = await res.json();
+        setLeads((prev) => [data, ...prev]);
+        setShowAddLead(false);
+        setAddLeadForm({
+          name: "",
+          business_name: "",
+          email: "",
+          phone: "",
+          website_or_facebook: "",
+          business_type: "",
+          help_needed: "",
+          message: "",
+          source: "manual",
+          urgency: "normal",
+          status: "new",
+        });
+      } else {
+        console.error("[admin] create lead failed:", await res.text());
+      }
+    } catch (err) {
+      console.error("[admin] create lead error:", err);
+    } finally {
+      setAddLeadSaving(false);
+    }
+  }
+
   async function handleLogout() {
     await fetch("/api/admin/logout", { method: "POST" });
     window.location.href = "/admin";
@@ -347,13 +496,21 @@ export default function AdminDashboard({
           <span className="text-white/30 text-xs">|</span>
           <span className="text-blue-300 text-sm">Admin</span>
         </div>
-        <button
-          onClick={handleLogout}
-          className="flex items-center gap-1.5 text-xs text-white/60 hover:text-white transition-colors duration-200"
-        >
-          <LogOut size={14} />
-          Sign out
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowAddLead(true)}
+            className="flex items-center gap-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg transition-colors duration-200"
+          >
+            + Add Lead
+          </button>
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-1.5 text-xs text-white/60 hover:text-white transition-colors duration-200"
+          >
+            <LogOut size={14} />
+            Sign out
+          </button>
+        </div>
       </header>
 
       {/* ── Body ── */}
@@ -460,6 +617,11 @@ export default function AdminDashboard({
                       <td className="px-5 py-3.5">
                         <div className="font-medium text-[#0f1c40]">{lead.name}</div>
                         <div className="text-xs text-slate-400 mt-0.5">{lead.business_name}</div>
+                        {lead.source && (
+                          <div className="mt-1">
+                            <SourceBadge source={lead.source} />
+                          </div>
+                        )}
                       </td>
                       <td className="px-5 py-3.5 max-w-[180px]">
                         <span className="text-slate-600 truncate block">{lead.help_needed || "—"}</span>
@@ -493,6 +655,11 @@ export default function AdminDashboard({
               <div>
                 <div className="font-semibold text-[#0f1c40]">{selectedLead.name}</div>
                 <div className="text-sm text-slate-500">{selectedLead.business_name}</div>
+                {selectedLead.source && (
+                  <div className="mt-1.5">
+                    <SourceBadge source={selectedLead.source} />
+                  </div>
+                )}
               </div>
               <button
                 onClick={() => setSelectedId(null)}
@@ -651,6 +818,81 @@ export default function AdminDashboard({
                 )}
               </div>
 
+              {/* ── Communications ── */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <MessageSquare size={13} className="text-slate-400" />
+                  <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest">
+                    Communications
+                  </div>
+                </div>
+
+                {messagesLoading ? (
+                  <p className="text-xs text-slate-400">Loading...</p>
+                ) : messages.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic mb-4">No communications logged yet.</p>
+                ) : (
+                  <div className="space-y-3 mb-4">
+                    {messages.map((msg) => (
+                      <div key={msg.id} className="border border-slate-100 rounded-lg p-3">
+                        <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                          <SourceBadge source={msg.channel} />
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 font-medium">
+                            {DIRECTION_LABELS[msg.direction] ?? msg.direction}
+                          </span>
+                          <span className="text-xs text-slate-400 ml-auto">
+                            {formatNoteDateTime(msg.created_at)}
+                          </span>
+                        </div>
+                        <p className="text-sm text-slate-600 whitespace-pre-wrap leading-relaxed">
+                          {msg.body}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Add communication summary */}
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <select
+                      value={messageDraft.channel}
+                      onChange={(e) => setMessageDraft((d) => ({ ...d, channel: e.target.value }))}
+                      className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                    >
+                      {SOURCE_OPTIONS.map((s) => (
+                        <option key={s} value={s}>{SOURCE_LABELS[s]}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={messageDraft.direction}
+                      onChange={(e) => setMessageDraft((d) => ({ ...d, direction: e.target.value }))}
+                      className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                    >
+                      <option value="inbound">Inbound</option>
+                      <option value="outbound">Outbound</option>
+                      <option value="internal">Internal</option>
+                    </select>
+                  </div>
+                  <textarea
+                    value={messageDraft.body}
+                    onChange={(e) => setMessageDraft((d) => ({ ...d, body: e.target.value }))}
+                    rows={3}
+                    placeholder="Add communication summary..."
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400 resize-none leading-relaxed"
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      onClick={handleSaveMessage}
+                      disabled={messageSaving || !messageDraft.body.trim()}
+                      className="text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {messageSaving ? "Saving..." : "Save message"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               {/* ── Internal notes ── */}
               <div>
                 <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2">
@@ -702,6 +944,181 @@ export default function AdminDashboard({
           </div>
         )}
       </div>
+
+      {/* ── Add Lead Modal ── */}
+      {showAddLead && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setShowAddLead(false)}
+          />
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <h2 className="font-semibold text-[#0f1c40]">Add Lead</h2>
+              <button
+                onClick={() => setShowAddLead(false)}
+                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors duration-150"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">
+                    Name <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={addLeadForm.name}
+                    onChange={(e) => setAddLeadForm((f) => ({ ...f, name: e.target.value }))}
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">
+                    Business name
+                  </label>
+                  <input
+                    type="text"
+                    value={addLeadForm.business_name}
+                    onChange={(e) => setAddLeadForm((f) => ({ ...f, business_name: e.target.value }))}
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">
+                    Email <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="email"
+                    value={addLeadForm.email}
+                    onChange={(e) => setAddLeadForm((f) => ({ ...f, email: e.target.value }))}
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">
+                    Phone
+                  </label>
+                  <input
+                    type="tel"
+                    value={addLeadForm.phone}
+                    onChange={(e) => setAddLeadForm((f) => ({ ...f, phone: e.target.value }))}
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">
+                  Website / Facebook
+                </label>
+                <input
+                  type="text"
+                  value={addLeadForm.website_or_facebook}
+                  onChange={(e) => setAddLeadForm((f) => ({ ...f, website_or_facebook: e.target.value }))}
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">
+                    Business type
+                  </label>
+                  <input
+                    type="text"
+                    value={addLeadForm.business_type}
+                    onChange={(e) => setAddLeadForm((f) => ({ ...f, business_type: e.target.value }))}
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">
+                    Service / Help needed
+                  </label>
+                  <input
+                    type="text"
+                    value={addLeadForm.help_needed}
+                    onChange={(e) => setAddLeadForm((f) => ({ ...f, help_needed: e.target.value }))}
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">
+                  Message
+                </label>
+                <textarea
+                  rows={3}
+                  value={addLeadForm.message}
+                  onChange={(e) => setAddLeadForm((f) => ({ ...f, message: e.target.value }))}
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400 resize-none leading-relaxed"
+                />
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">
+                    Source
+                  </label>
+                  <select
+                    value={addLeadForm.source}
+                    onChange={(e) => setAddLeadForm((f) => ({ ...f, source: e.target.value }))}
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                  >
+                    {SOURCE_OPTIONS.map((s) => (
+                      <option key={s} value={s}>{SOURCE_LABELS[s]}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">
+                    Urgency
+                  </label>
+                  <select
+                    value={addLeadForm.urgency}
+                    onChange={(e) => setAddLeadForm((f) => ({ ...f, urgency: e.target.value as "emergency" | "normal" }))}
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                  >
+                    <option value="normal">Normal</option>
+                    <option value="emergency">Emergency</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">
+                    Status
+                  </label>
+                  <select
+                    value={addLeadForm.status}
+                    onChange={(e) => setAddLeadForm((f) => ({ ...f, status: e.target.value as Lead["status"] }))}
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                  >
+                    {STATUS_OPTIONS.map((s) => (
+                      <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100">
+              <button
+                onClick={() => setShowAddLead(false)}
+                className="text-sm text-slate-500 hover:text-slate-700 transition-colors duration-150"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddLead}
+                disabled={addLeadSaving || !addLeadForm.name.trim() || !addLeadForm.email.trim()}
+                className="text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {addLeadSaving ? "Saving..." : "Add lead"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

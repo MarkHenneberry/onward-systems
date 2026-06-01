@@ -56,7 +56,7 @@ export async function POST(req: Request) {
       message: message?.trim() || null,
       urgency,
       status: "new",
-      source: "onward_website",
+      source: "website",
     };
 
     console.log("[supabase] inserting payload:", JSON.stringify(payload));
@@ -81,6 +81,21 @@ export async function POST(req: Request) {
     }
 
     console.log("[supabase] insert succeeded, lead id:", data?.id);
+
+    // Insert initial website message (non-fatal — lead and emails still complete on failure)
+    if (data?.id) {
+      const { error: msgError } = await supabase
+        .from("messages")
+        .insert({
+          lead_id: data.id,
+          channel: "website",
+          direction: "inbound",
+          body: message?.trim() || "[No message provided]",
+        });
+      if (msgError) {
+        console.error("[supabase] message insert error:", msgError.message);
+      }
+    }
   } catch (err) {
     console.error("[supabase] client/network error:", err);
     return NextResponse.json(
