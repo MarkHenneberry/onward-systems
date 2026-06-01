@@ -95,6 +95,19 @@ export async function POST(req: Request) {
       if (msgError) {
         console.error("[supabase] message insert error:", msgError.message);
       }
+
+      // Insert lead_created activity (non-fatal)
+      const { error: actError } = await supabase
+        .from("lead_activities")
+        .insert({
+          lead_id: data.id,
+          type: "lead_created",
+          label: "Lead created from Website",
+          metadata: { source: "website" },
+        });
+      if (actError) {
+        console.error("[supabase] activity insert error:", actError.message);
+      }
     }
   } catch (err) {
     console.error("[supabase] client/network error:", err);

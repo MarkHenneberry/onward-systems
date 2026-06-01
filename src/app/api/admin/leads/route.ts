@@ -78,5 +78,20 @@ export async function POST(req: Request) {
     }
   }
 
+  // Insert lead_created activity (non-fatal)
+  const sourceName = (body.source ?? "manual");
+  const sourceLabel = sourceName.charAt(0).toUpperCase() + sourceName.slice(1);
+  const { error: actError } = await supabase
+    .from("lead_activities")
+    .insert({
+      lead_id: lead.id,
+      type: "lead_created",
+      label: `Lead created from ${sourceLabel}`,
+      metadata: { source: body.source ?? "manual" },
+    });
+  if (actError) {
+    console.error("[admin] activity insert on lead create error:", actError.message);
+  }
+
   return NextResponse.json({ data: lead }, { status: 201 });
 }

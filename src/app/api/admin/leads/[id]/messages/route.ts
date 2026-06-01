@@ -75,5 +75,25 @@ export async function POST(
     return NextResponse.json({ error: "Failed to save message." }, { status: 500 });
   }
 
+  // Log activity (non-fatal)
+  const ch = body.channel ?? "manual";
+  const dir = body.direction ?? "inbound";
+  const chLabel = ch.charAt(0).toUpperCase() + ch.slice(1);
+  let actLabel: string;
+  if (ch === "website" && dir === "inbound") actLabel = "Website message received";
+  else if (dir === "outbound") actLabel = `${chLabel} message sent`;
+  else if (dir === "internal") actLabel = `${chLabel} internal note logged`;
+  else actLabel = `${chLabel} message logged`;
+
+  const { error: actErr } = await supabase
+    .from("lead_activities")
+    .insert({
+      lead_id: id,
+      type: "message_created",
+      label: actLabel,
+      metadata: { channel: ch, direction: dir },
+    });
+  if (actErr) console.error("[admin] message activity insert error:", actErr.message);
+
   return NextResponse.json({ data });
 }

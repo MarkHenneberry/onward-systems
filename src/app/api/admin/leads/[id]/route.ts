@@ -12,6 +12,20 @@ const VALID_STATUSES = [
   "lost",
 ];
 
+const STATUS_LABELS: Record<string, string> = {
+  new: "New",
+  contacted: "Contacted",
+  quoted: "Quoted",
+  booked: "Booked",
+  completed: "Completed",
+  lost: "Lost",
+};
+
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
 async function checkAuth(): Promise<boolean> {
   if (!isAdminPasswordSet()) return false;
   const cookieStore = await cookies();
@@ -66,6 +80,48 @@ export async function PATCH(
   if (error) {
     console.error("[admin] lead update error:", error);
     return NextResponse.json({ error: "Failed to update lead." }, { status: 500 });
+  }
+
+  // ── Log activities (non-fatal) ──────────────────────────────────────────────
+
+  // Status change — client passes _prev_status so we can show "from X to Y"
+  if ("status" in body) {
+    const prevStatus = typeof body._prev_status === "string" ? body._prev_status : null;
+    const fromLabel = prevStatus ? (STATUS_LABELS[prevStatus] ?? prevStatus) : null;
+    const toLabel = STATUS_LABELS[body.status] ?? body.status;
+    const label = fromLabel && fromLabel !== toLabel
+      ? `Status changed from ${fromLabel} to ${toLabel}`
+      : `Status set to ${toLabel}`;
+    const { error: actErr } = await supabase
+      .from("lead_activities")
+      .insert({
+        lead_id: id,
+        type: "status_changed",
+        label,
+        metadata: { from: prevStatus, to: body.status },
+      });
+    if (actErr) console.error("[admin] status activity insert error:", actErr.message);
+  }
+
+  // Follow-up date change
+  if ("follow_up_date" in body) {
+    let label: string;
+    if (body.follow_up_date) {
+      const parts = (body.follow_up_date as string).split("-");
+      const formatted = `${MONTHS[parseInt(parts[1]) - 1]} ${parseInt(parts[2])}, ${parts[0]}`;
+      label = `Follow-up set for ${formatted}`;
+    } else {
+      label = "Follow-up date cleared";
+    }
+    const { error: actErr } = await supabase
+      .from("lead_activities")
+      .insert({
+        lead_id: id,
+        type: "follow_up_set",
+        label,
+        metadata: { date: body.follow_up_date || null },
+      });
+    if (actErr) console.error("[admin] follow-up activity insert error:", actErr.message);
   }
 
   return NextResponse.json({ ok: true });

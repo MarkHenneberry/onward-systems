@@ -12,6 +12,12 @@ import {
   Mail,
   Phone,
   MessageSquare,
+  UserPlus,
+  FileText,
+  ArrowRight,
+  Download,
+  LayoutGrid,
+  Send,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -50,6 +56,17 @@ type Message = {
   body: string;
   created_at: string;
 };
+
+type Activity = {
+  id: string;
+  lead_id: string;
+  type: string;
+  label: string;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+};
+
+type DetailTab = "overview" | "messages" | "notes" | "timeline";
 
 const STATUS_OPTIONS = [
   "new",
@@ -112,6 +129,31 @@ const DIRECTION_LABELS: Record<string, string> = {
   internal: "Internal",
 };
 
+type ActivityStyle = { Icon: React.ElementType; bg: string; color: string };
+
+const ACTIVITY_STYLES: Record<string, ActivityStyle> = {
+  lead_created: { Icon: UserPlus, bg: "bg-blue-50", color: "text-blue-500" },
+  message_created: { Icon: MessageSquare, bg: "bg-indigo-50", color: "text-indigo-500" },
+  note_added: { Icon: FileText, bg: "bg-slate-100", color: "text-slate-500" },
+  status_changed: { Icon: ArrowRight, bg: "bg-amber-50", color: "text-amber-500" },
+  follow_up_set: { Icon: Calendar, bg: "bg-green-50", color: "text-green-500" },
+  calendar_exported: { Icon: Download, bg: "bg-slate-100", color: "text-slate-500" },
+  urgency_changed: { Icon: AlertTriangle, bg: "bg-red-50", color: "text-red-500" },
+};
+
+const DEFAULT_ACTIVITY_STYLE: ActivityStyle = {
+  Icon: Clock,
+  bg: "bg-slate-100",
+  color: "text-slate-400",
+};
+
+const DETAIL_TABS: { id: DetailTab; label: string; Icon: React.ElementType }[] = [
+  { id: "overview", label: "Overview", Icon: LayoutGrid },
+  { id: "messages", label: "Messages", Icon: MessageSquare },
+  { id: "notes", label: "Notes", Icon: FileText },
+  { id: "timeline", label: "Timeline", Icon: Clock },
+];
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatDate(iso: string | null): string {
@@ -141,6 +183,13 @@ function formatNoteDateTime(iso: string): string {
 function toDateInputValue(iso: string | null): string {
   if (!iso) return "";
   return iso.split("T")[0];
+}
+
+function isFollowUpOverdue(iso: string | null): boolean {
+  if (!iso) return false;
+  const todayEnd = new Date();
+  todayEnd.setHours(23, 59, 59, 999);
+  return new Date(iso) <= todayEnd;
 }
 
 // Strips spaces, brackets, and dashes from phone numbers for tel: links.
@@ -262,12 +311,12 @@ function InfoRow({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-start gap-2">
       <div className="flex gap-3 text-sm flex-1 min-w-0">
-        <span className="text-slate-400 w-32 shrink-0">{label}</span>
-        <span className="text-slate-700 flex-1 break-words min-w-0">{value}</span>
+        <span className="text-slate-400 w-28 shrink-0 pt-px">{label}</span>
+        <span className="text-slate-700 flex-1 min-w-0" style={{ overflowWrap: "anywhere" }}>{value}</span>
       </div>
-      {action}
+      {action && <div className="shrink-0">{action}</div>}
     </div>
   );
 }
@@ -281,6 +330,7 @@ export default function AdminDashboard({
 }) {
   const [leads, setLeads] = useState<Lead[]>(initialLeads);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<DetailTab>("overview");
   const [statusFilter, setStatusFilter] = useState("all");
   const [urgencyFilter, setUrgencyFilter] = useState("all");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
@@ -296,6 +346,15 @@ export default function AdminDashboard({
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [messageDraft, setMessageDraft] = useState({ channel: "manual", direction: "inbound", body: "" });
   const [messageSaving, setMessageSaving] = useState(false);
+
+  // Activities state
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [activitiesLoading, setActivitiesLoading] = useState(false);
+
+  // Email reply state
+  const [emailDraft, setEmailDraft] = useState({ subject: "Re: Your request with Onward Systems", body: "" });
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailFeedback, setEmailFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // Add Lead modal state
   const [showAddLead, setShowAddLead] = useState(false);
@@ -316,12 +375,16 @@ export default function AdminDashboard({
 
   const selectedLead = leads.find((l) => l.id === selectedId) ?? null;
 
-  // Fetch notes and messages whenever a different lead is selected
+  // Fetch notes, messages, and activities whenever a different lead is selected
   useEffect(() => {
     setNoteDraft("");
     setNoteHistory([]);
     setMessages([]);
     setMessageDraft({ channel: "manual", direction: "inbound", body: "" });
+    setActivities([]);
+    setActiveTab("overview");
+    setEmailDraft({ subject: "Re: Your request with Onward Systems", body: "" });
+    setEmailFeedback(null);
 
     if (!selectedId) return;
 
@@ -338,7 +401,22 @@ export default function AdminDashboard({
       .then(({ data }) => setMessages(data ?? []))
       .catch((err) => console.error("[admin] failed to load messages:", err))
       .finally(() => setMessagesLoading(false));
+
+    setActivitiesLoading(true);
+    fetch(`/api/admin/leads/${selectedId}/activities`)
+      .then((r) => r.json())
+      .then(({ data }) => setActivities(data ?? []))
+      .catch((err) => console.error("[admin] failed to load activities:", err))
+      .finally(() => setActivitiesLoading(false));
   }, [selectedId]);
+
+  // Refresh activities after mutations that create server-side activity records
+  function refreshActivities(id: string) {
+    fetch(`/api/admin/leads/${id}/activities`)
+      .then((r) => r.json())
+      .then(({ data }) => setActivities(data ?? []))
+      .catch((err) => console.error("[admin] failed to refresh activities:", err));
+  }
 
   // Overview stats
   const stats = useMemo(() => {
@@ -369,11 +447,15 @@ export default function AdminDashboard({
 
   // ── Mutations ──────────────────────────────────────────────────────────────
 
-  async function patchLead(id: string, updates: Partial<Lead>): Promise<boolean> {
+  async function patchLead(
+    id: string,
+    updates: Partial<Lead>,
+    extra?: Record<string, unknown>
+  ): Promise<boolean> {
     const res = await fetch(`/api/admin/leads/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(updates),
+      body: JSON.stringify({ ...updates, ...extra }),
     });
     if (!res.ok) {
       console.error("[admin] patch failed:", await res.text());
@@ -384,11 +466,18 @@ export default function AdminDashboard({
   }
 
   async function handleStatusChange(id: string, status: string) {
-    await patchLead(id, { status: status as Lead["status"] });
+    const prevStatus = selectedLead?.status;
+    const ok = await patchLead(
+      id,
+      { status: status as Lead["status"] },
+      { _prev_status: prevStatus }
+    );
+    if (ok) refreshActivities(id);
   }
 
   async function handleFollowUpChange(id: string, dateValue: string) {
-    await patchLead(id, { follow_up_date: dateValue || null });
+    const ok = await patchLead(id, { follow_up_date: dateValue || null });
+    if (ok) refreshActivities(id);
   }
 
   async function handleSaveNote() {
@@ -404,6 +493,7 @@ export default function AdminDashboard({
         const { data } = await res.json();
         setNoteHistory((prev) => [data, ...prev]);
         setNoteDraft("");
+        refreshActivities(selectedId);
       } else {
         console.error("[admin] save note failed:", await res.text());
       }
@@ -431,6 +521,7 @@ export default function AdminDashboard({
         const { data } = await res.json();
         setMessages((prev) => [...prev, data]);
         setMessageDraft({ channel: "manual", direction: "inbound", body: "" });
+        refreshActivities(selectedId);
       } else {
         console.error("[admin] save message failed:", await res.text());
       }
@@ -438,6 +529,57 @@ export default function AdminDashboard({
       console.error("[admin] save message error:", err);
     } finally {
       setMessageSaving(false);
+    }
+  }
+
+  async function handleCalendarExport() {
+    if (!selectedLead) return;
+    downloadIcs(selectedLead);
+    try {
+      const res = await fetch(`/api/admin/leads/${selectedLead.id}/activities`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "calendar_exported",
+          label: "Follow-up calendar event exported",
+        }),
+      });
+      if (res.ok) {
+        const { data } = await res.json();
+        setActivities((prev) => [data, ...prev]);
+      }
+    } catch (err) {
+      console.error("[admin] calendar export activity error:", err);
+    }
+  }
+
+  async function handleSendEmail() {
+    if (!selectedId || !emailDraft.subject.trim() || !emailDraft.body.trim()) return;
+    setEmailSending(true);
+    setEmailFeedback(null);
+    try {
+      const res = await fetch(`/api/admin/leads/${selectedId}/email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: emailDraft.subject.trim(),
+          body: emailDraft.body.trim(),
+        }),
+      });
+      const json = await res.json();
+      if (res.ok) {
+        setEmailDraft((d) => ({ ...d, body: "" }));
+        if (json.message) setMessages((prev) => [...prev, json.message]);
+        if (json.activity) setActivities((prev) => [json.activity, ...prev]);
+        setEmailFeedback({ type: "success", text: "Email sent." });
+      } else {
+        setEmailFeedback({ type: "error", text: json.error ?? "Failed to send email." });
+      }
+    } catch (err) {
+      console.error("[admin] send email error:", err);
+      setEmailFeedback({ type: "error", text: "Failed to send email. Try again." });
+    } finally {
+      setEmailSending(false);
     }
   }
 
@@ -480,6 +622,397 @@ export default function AdminDashboard({
   async function handleLogout() {
     await fetch("/api/admin/logout", { method: "POST" });
     window.location.href = "/admin";
+  }
+
+  // ── Tab content renderers ──────────────────────────────────────────────────
+
+  function renderOverviewTab() {
+    if (!selectedLead) return null;
+    return (
+      <div className="space-y-6">
+        {/* Status + urgency */}
+        <div className="flex gap-3 flex-wrap">
+          <div className="flex-1 min-w-[140px]">
+            <label className="text-xs font-semibold text-slate-400 uppercase tracking-widest block mb-1.5">
+              Status
+            </label>
+            <select
+              value={selectedLead.status}
+              onChange={(e) => handleStatusChange(selectedLead.id, e.target.value)}
+              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+            >
+              {STATUS_OPTIONS.map((s) => (
+                <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-400 uppercase tracking-widest block mb-1.5">
+              Urgency
+            </label>
+            <div className="py-2">
+              <UrgencyBadge urgency={selectedLead.urgency} />
+            </div>
+          </div>
+        </div>
+
+        {/* Follow-up date */}
+        <div>
+          <label className="text-xs font-semibold text-slate-400 uppercase tracking-widest block mb-1.5">
+            Follow-up date
+          </label>
+          <input
+            type="date"
+            value={toDateInputValue(selectedLead.follow_up_date)}
+            onChange={(e) => handleFollowUpChange(selectedLead.id, e.target.value)}
+            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+          />
+          {selectedLead.follow_up_date && (
+            <button
+              onClick={handleCalendarExport}
+              className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-blue-600 border border-slate-200 hover:border-blue-400 px-3 py-1.5 rounded-lg transition-colors duration-150"
+            >
+              <Calendar size={12} />
+              Add follow-up to calendar
+            </button>
+          )}
+        </div>
+
+        {/* Contact info */}
+        <div>
+          <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
+            Contact
+          </div>
+          <div className="space-y-3">
+            <InfoRow
+              label="Email"
+              value={
+                <a
+                  href={`mailto:${selectedLead.email}`}
+                  className="text-blue-600 hover:underline"
+                >
+                  {selectedLead.email}
+                </a>
+              }
+              action={
+                <a
+                  href={`mailto:${selectedLead.email}`}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-blue-600 border border-slate-200 hover:border-blue-400 px-2 py-1 rounded-lg transition-colors duration-150"
+                >
+                  <Mail size={11} />
+                  Email
+                </a>
+              }
+            />
+            <InfoRow
+              label="Phone"
+              value={
+                selectedLead.phone ? (
+                  <a
+                    href={`tel:${cleanPhone(selectedLead.phone)}`}
+                    className="text-slate-700 hover:text-blue-600 transition-colors duration-150"
+                  >
+                    {selectedLead.phone}
+                  </a>
+                ) : (
+                  "—"
+                )
+              }
+              action={
+                selectedLead.phone ? (
+                  <a
+                    href={`tel:${cleanPhone(selectedLead.phone)}`}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-blue-600 border border-slate-200 hover:border-blue-400 px-2 py-1 rounded-lg transition-colors duration-150"
+                  >
+                    <Phone size={11} />
+                    Call
+                  </a>
+                ) : undefined
+              }
+            />
+            <InfoRow
+              label="Website / FB"
+              value={
+                selectedLead.website_or_facebook ? (
+                  <a
+                    href={
+                      selectedLead.website_or_facebook.startsWith("http")
+                        ? selectedLead.website_or_facebook
+                        : `https://${selectedLead.website_or_facebook}`
+                    }
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline"
+                  >
+                    {selectedLead.website_or_facebook}
+                  </a>
+                ) : (
+                  "—"
+                )
+              }
+            />
+            <InfoRow label="Business type" value={selectedLead.business_type || "—"} />
+          </div>
+        </div>
+
+        {/* Request details */}
+        <div>
+          <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
+            Request
+          </div>
+          <div className="space-y-3">
+            <InfoRow label="Help needed" value={selectedLead.help_needed || "—"} />
+            <InfoRow label="Submitted" value={formatDate(selectedLead.created_at)} />
+            {selectedLead.updated_at && (
+              <InfoRow label="Updated" value={formatDate(selectedLead.updated_at)} />
+            )}
+            {selectedLead.follow_up_date && (
+              <InfoRow
+                label="Follow-up"
+                value={
+                  <span className={isFollowUpOverdue(selectedLead.follow_up_date) ? "text-amber-600 font-medium" : undefined}>
+                    {formatDate(selectedLead.follow_up_date)}
+                    {isFollowUpOverdue(selectedLead.follow_up_date) && " · due"}
+                  </span>
+                }
+              />
+            )}
+          </div>
+          {selectedLead.message && (
+            <div className="mt-4">
+              <div className="text-xs text-slate-400 mb-1.5">Original message</div>
+              <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 border border-slate-100 rounded-lg p-3 whitespace-pre-wrap">
+                {selectedLead.message}
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  function renderMessagesTab() {
+    return (
+      <div>
+        {/* Message list */}
+        {messagesLoading ? (
+          <p className="text-xs text-slate-400 py-2">Loading...</p>
+        ) : messages.length === 0 ? (
+          <p className="text-xs text-slate-400 italic py-2 mb-4">No messages logged yet.</p>
+        ) : (
+          <div className="space-y-3 mb-5">
+            {messages.map((msg) => (
+              <div key={msg.id} className="border border-slate-100 rounded-lg p-3">
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                  <SourceBadge source={msg.channel} />
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 font-medium">
+                    {DIRECTION_LABELS[msg.direction] ?? msg.direction}
+                  </span>
+                  <span className="text-xs text-slate-400 ml-auto">
+                    {formatNoteDateTime(msg.created_at)}
+                  </span>
+                </div>
+                <p className="text-sm text-slate-600 whitespace-pre-wrap leading-relaxed">
+                  {msg.body}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Email reply form */}
+        {selectedLead?.email && (
+          <div className="border-t border-slate-100 pt-4 space-y-2">
+            <div className="flex items-center gap-2 mb-2">
+              <Send size={12} className="text-slate-400" />
+              <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest">
+                Reply by Email
+              </div>
+            </div>
+            <div className="text-xs text-slate-400 mb-2">
+              To: <span className="text-slate-600">{selectedLead.email}</span>
+            </div>
+            <input
+              type="text"
+              value={emailDraft.subject}
+              onChange={(e) => {
+                setEmailDraft((d) => ({ ...d, subject: e.target.value }));
+                setEmailFeedback(null);
+              }}
+              placeholder="Subject"
+              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+            />
+            <textarea
+              value={emailDraft.body}
+              onChange={(e) => {
+                setEmailDraft((d) => ({ ...d, body: e.target.value }));
+                setEmailFeedback(null);
+              }}
+              rows={5}
+              placeholder="Write a reply to this lead..."
+              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400 resize-none leading-relaxed"
+            />
+            <div className="flex items-center justify-between gap-3">
+              {emailFeedback ? (
+                <span
+                  className={`text-xs font-medium ${
+                    emailFeedback.type === "success" ? "text-green-600" : "text-red-500"
+                  }`}
+                >
+                  {emailFeedback.text}
+                </span>
+              ) : (
+                <span />
+              )}
+              <button
+                onClick={handleSendEmail}
+                disabled={emailSending || !emailDraft.subject.trim() || !emailDraft.body.trim()}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold bg-[#0f1c40] hover:bg-[#1a2d5a] text-white px-3 py-1.5 rounded-lg transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Send size={11} />
+                {emailSending ? "Sending..." : "Send email"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Add communication form */}
+        <div className="border-t border-slate-100 pt-4 space-y-2">
+          <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2">
+            Log communication
+          </div>
+          <div className="flex gap-2">
+            <select
+              value={messageDraft.channel}
+              onChange={(e) => setMessageDraft((d) => ({ ...d, channel: e.target.value }))}
+              className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+            >
+              {SOURCE_OPTIONS.map((s) => (
+                <option key={s} value={s}>{SOURCE_LABELS[s]}</option>
+              ))}
+            </select>
+            <select
+              value={messageDraft.direction}
+              onChange={(e) => setMessageDraft((d) => ({ ...d, direction: e.target.value }))}
+              className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+            >
+              <option value="inbound">Inbound</option>
+              <option value="outbound">Outbound</option>
+              <option value="internal">Internal</option>
+            </select>
+          </div>
+          <textarea
+            value={messageDraft.body}
+            onChange={(e) => setMessageDraft((d) => ({ ...d, body: e.target.value }))}
+            rows={3}
+            placeholder="Example: Customer messaged on Facebook asking for a driveway quote next week."
+            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400 resize-none leading-relaxed"
+          />
+          <div className="flex justify-end">
+            <button
+              onClick={handleSaveMessage}
+              disabled={messageSaving || !messageDraft.body.trim()}
+              className="text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {messageSaving ? "Saving..." : "Save message"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderNotesTab() {
+    return (
+      <div>
+        <p className="text-xs text-slate-400 mb-3">
+          Internal notes are private and are not sent to the customer.
+        </p>
+        <textarea
+          value={noteDraft}
+          onChange={(e) => setNoteDraft(e.target.value)}
+          rows={4}
+          placeholder="Add a note..."
+          className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400 resize-none leading-relaxed"
+        />
+        <div className="flex justify-end mt-2">
+          <button
+            onClick={handleSaveNote}
+            disabled={noteSaving || !noteDraft.trim()}
+            className="text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {noteSaving ? "Saving..." : "Save note"}
+          </button>
+        </div>
+
+        {/* Note history */}
+        <div className="mt-5">
+          {notesLoading ? (
+            <p className="text-xs text-slate-400">Loading...</p>
+          ) : noteHistory.length === 0 ? (
+            <p className="text-xs text-slate-400 italic">No internal notes yet.</p>
+          ) : (
+            <>
+              <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
+                History
+              </div>
+              <div className="space-y-3">
+                {noteHistory.map((n) => (
+                  <div key={n.id} className="border-l-2 border-blue-200 pl-3">
+                    <div className="text-xs text-slate-400 mb-1">
+                      {formatNoteDateTime(n.created_at)}
+                    </div>
+                    <p className="text-sm text-slate-600 whitespace-pre-wrap leading-relaxed">
+                      {n.note}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  function renderTimelineTab() {
+    if (activitiesLoading) {
+      return <p className="text-xs text-slate-400 py-2">Loading...</p>;
+    }
+    if (activities.length === 0) {
+      return <p className="text-xs text-slate-400 italic py-2">No activity yet.</p>;
+    }
+    return (
+      <div>
+        {activities.map((activity, index) => {
+          const style = ACTIVITY_STYLES[activity.type] ?? DEFAULT_ACTIVITY_STYLE;
+          const { Icon } = style;
+          const isLast = index === activities.length - 1;
+          return (
+            <div key={activity.id} className="flex gap-3">
+              {/* Icon + connector line */}
+              <div className="flex flex-col items-center shrink-0">
+                <div
+                  className={`w-7 h-7 rounded-full flex items-center justify-center ${style.bg}`}
+                >
+                  <Icon size={12} className={style.color} />
+                </div>
+                {!isLast && (
+                  <div className="w-px flex-1 bg-slate-100 my-1" style={{ minHeight: "12px" }} />
+                )}
+              </div>
+              {/* Content */}
+              <div className={`flex-1 min-w-0 ${isLast ? "pb-0" : "pb-4"}`}>
+                <p className="text-sm text-slate-700 leading-snug">{activity.label}</p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {formatNoteDateTime(activity.created_at)}
+                </p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -633,10 +1166,22 @@ export default function AdminDashboard({
                         <StatusBadge status={lead.status} />
                       </td>
                       <td className="px-5 py-3.5 text-slate-500 text-xs whitespace-nowrap">
-                        {formatDate(lead.created_at)}
+                        <div>{formatDate(lead.created_at)}</div>
+                        {lead.follow_up_date && (
+                          <div
+                            className={`mt-0.5 flex items-center gap-1 ${
+                              isFollowUpOverdue(lead.follow_up_date)
+                                ? "text-amber-600 font-medium"
+                                : "text-slate-400"
+                            }`}
+                          >
+                            <Clock size={10} />
+                            {formatDate(lead.follow_up_date)}
+                          </div>
+                        )}
                       </td>
                       <td className="px-5 py-3.5">
-                        <div className="text-slate-600 text-xs">{lead.email}</div>
+                        <div className="text-slate-600 text-xs truncate max-w-[140px]">{lead.email}</div>
                         <div className="text-slate-400 text-xs mt-0.5">{lead.phone ?? ""}</div>
                       </td>
                     </tr>
@@ -649,297 +1194,58 @@ export default function AdminDashboard({
 
         {/* ── Right panel: lead detail ── */}
         {selectedLead && (
-          <div className="w-full lg:w-[420px] bg-white border-l border-slate-100 flex flex-col overflow-hidden shrink-0">
-            {/* Panel header */}
-            <div className="flex items-start justify-between px-6 py-4 border-b border-slate-100 shrink-0">
-              <div>
-                <div className="font-semibold text-[#0f1c40]">{selectedLead.name}</div>
-                <div className="text-sm text-slate-500">{selectedLead.business_name}</div>
-                {selectedLead.source && (
-                  <div className="mt-1.5">
-                    <SourceBadge source={selectedLead.source} />
+          <div className="w-full lg:w-[520px] bg-white border-l border-slate-100 flex flex-col overflow-hidden shrink-0">
+            {/* Panel header — always visible */}
+            <div className="px-6 pt-5 pb-4 border-b border-slate-100 shrink-0">
+              <div className="flex items-start justify-between">
+                <div className="flex-1 min-w-0 pr-3">
+                  <div className="font-semibold text-[#0f1c40] text-base leading-tight">
+                    {selectedLead.name}
                   </div>
-                )}
-              </div>
-              <button
-                onClick={() => setSelectedId(null)}
-                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors duration-150 mt-0.5 shrink-0"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            {/* Panel body */}
-            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
-              {/* Status + urgency */}
-              <div className="flex gap-4 flex-wrap">
-                <div className="flex-1 min-w-[140px]">
-                  <label className="text-xs font-semibold text-slate-400 uppercase tracking-widest block mb-1.5">
-                    Status
-                  </label>
-                  <select
-                    value={selectedLead.status}
-                    onChange={(e) => handleStatusChange(selectedLead.id, e.target.value)}
-                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
-                  >
-                    {STATUS_OPTIONS.map((s) => (
-                      <option key={s} value={s}>{STATUS_LABELS[s]}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-slate-400 uppercase tracking-widest block mb-1.5">
-                    Urgency
-                  </label>
-                  <div className="py-2">
-                    <UrgencyBadge urgency={selectedLead.urgency} />
-                  </div>
-                </div>
-              </div>
-
-              {/* Follow-up date */}
-              <div>
-                <label className="text-xs font-semibold text-slate-400 uppercase tracking-widest block mb-1.5">
-                  Follow-up date
-                </label>
-                <input
-                  type="date"
-                  value={toDateInputValue(selectedLead.follow_up_date)}
-                  onChange={(e) => handleFollowUpChange(selectedLead.id, e.target.value)}
-                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
-                />
-                {selectedLead.follow_up_date && (
-                  <button
-                    onClick={() => downloadIcs(selectedLead)}
-                    className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-blue-600 border border-slate-200 hover:border-blue-400 px-3 py-1.5 rounded-lg transition-colors duration-150"
-                  >
-                    <Calendar size={12} />
-                    Add follow-up to calendar
-                  </button>
-                )}
-              </div>
-
-              {/* Contact info */}
-              <div>
-                <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
-                  Contact
-                </div>
-                <div className="space-y-2.5">
-                  <InfoRow
-                    label="Email"
-                    value={
-                      <a href={`mailto:${selectedLead.email}`} className="text-blue-600 hover:underline break-all">
-                        {selectedLead.email}
-                      </a>
-                    }
-                    action={
-                      <a
-                        href={`mailto:${selectedLead.email}`}
-                        className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-blue-600 border border-slate-200 hover:border-blue-400 px-2 py-1 rounded-lg transition-colors duration-150 shrink-0"
-                      >
-                        <Mail size={11} />
-                        Email
-                      </a>
-                    }
-                  />
-                  <InfoRow
-                    label="Phone"
-                    value={
-                      selectedLead.phone ? (
-                        <a
-                          href={`tel:${cleanPhone(selectedLead.phone)}`}
-                          className="text-slate-700 hover:text-blue-600 transition-colors duration-150"
-                        >
-                          {selectedLead.phone}
-                        </a>
-                      ) : (
-                        "—"
-                      )
-                    }
-                    action={
-                      selectedLead.phone ? (
-                        <a
-                          href={`tel:${cleanPhone(selectedLead.phone)}`}
-                          className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-blue-600 border border-slate-200 hover:border-blue-400 px-2 py-1 rounded-lg transition-colors duration-150 shrink-0"
-                        >
-                          <Phone size={11} />
-                          Call
-                        </a>
-                      ) : undefined
-                    }
-                  />
-                  <InfoRow
-                    label="Website / FB"
-                    value={
-                      selectedLead.website_or_facebook ? (
-                        <a
-                          href={
-                            selectedLead.website_or_facebook.startsWith("http")
-                              ? selectedLead.website_or_facebook
-                              : `https://${selectedLead.website_or_facebook}`
-                          }
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-600 hover:underline break-all"
-                        >
-                          {selectedLead.website_or_facebook}
-                        </a>
-                      ) : (
-                        "—"
-                      )
-                    }
-                  />
-                  <InfoRow label="Business type" value={selectedLead.business_type || "—"} />
-                </div>
-              </div>
-
-              {/* Request details */}
-              <div>
-                <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
-                  Request
-                </div>
-                <div className="space-y-2.5">
-                  <InfoRow label="Help needed" value={selectedLead.help_needed || "—"} />
-                  <InfoRow label="Submitted" value={formatDate(selectedLead.created_at)} />
-                  {selectedLead.updated_at && (
-                    <InfoRow label="Updated" value={formatDate(selectedLead.updated_at)} />
+                  {selectedLead.business_name && (
+                    <div className="text-sm text-slate-500 mt-0.5">{selectedLead.business_name}</div>
                   )}
-                  {selectedLead.follow_up_date && (
-                    <InfoRow label="Follow-up" value={formatDate(selectedLead.follow_up_date)} />
-                  )}
-                </div>
-                {selectedLead.message && (
-                  <div className="mt-4">
-                    <div className="text-xs text-slate-400 mb-1.5">Message</div>
-                    <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 border border-slate-100 rounded-lg p-3 whitespace-pre-wrap">
-                      {selectedLead.message}
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              {/* ── Communications ── */}
-              <div>
-                <div className="flex items-center gap-2 mb-3">
-                  <MessageSquare size={13} className="text-slate-400" />
-                  <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest">
-                    Communications
-                  </div>
-                </div>
-
-                {messagesLoading ? (
-                  <p className="text-xs text-slate-400">Loading...</p>
-                ) : messages.length === 0 ? (
-                  <p className="text-xs text-slate-400 italic mb-4">No communications logged yet.</p>
-                ) : (
-                  <div className="space-y-3 mb-4">
-                    {messages.map((msg) => (
-                      <div key={msg.id} className="border border-slate-100 rounded-lg p-3">
-                        <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                          <SourceBadge source={msg.channel} />
-                          <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 font-medium">
-                            {DIRECTION_LABELS[msg.direction] ?? msg.direction}
-                          </span>
-                          <span className="text-xs text-slate-400 ml-auto">
-                            {formatNoteDateTime(msg.created_at)}
-                          </span>
-                        </div>
-                        <p className="text-sm text-slate-600 whitespace-pre-wrap leading-relaxed">
-                          {msg.body}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Add communication summary */}
-                <div className="space-y-2">
-                  <div className="flex gap-2">
-                    <select
-                      value={messageDraft.channel}
-                      onChange={(e) => setMessageDraft((d) => ({ ...d, channel: e.target.value }))}
-                      className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
-                    >
-                      {SOURCE_OPTIONS.map((s) => (
-                        <option key={s} value={s}>{SOURCE_LABELS[s]}</option>
-                      ))}
-                    </select>
-                    <select
-                      value={messageDraft.direction}
-                      onChange={(e) => setMessageDraft((d) => ({ ...d, direction: e.target.value }))}
-                      className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
-                    >
-                      <option value="inbound">Inbound</option>
-                      <option value="outbound">Outbound</option>
-                      <option value="internal">Internal</option>
-                    </select>
-                  </div>
-                  <textarea
-                    value={messageDraft.body}
-                    onChange={(e) => setMessageDraft((d) => ({ ...d, body: e.target.value }))}
-                    rows={3}
-                    placeholder="Add communication summary..."
-                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400 resize-none leading-relaxed"
-                  />
-                  <div className="flex justify-end">
-                    <button
-                      onClick={handleSaveMessage}
-                      disabled={messageSaving || !messageDraft.body.trim()}
-                      className="text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      {messageSaving ? "Saving..." : "Save message"}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* ── Internal notes ── */}
-              <div>
-                <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2">
-                  Internal notes
-                </div>
-                <textarea
-                  value={noteDraft}
-                  onChange={(e) => setNoteDraft(e.target.value)}
-                  rows={3}
-                  placeholder="Add a note..."
-                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400 resize-none leading-relaxed"
-                />
-                <div className="flex justify-end mt-2">
-                  <button
-                    onClick={handleSaveNote}
-                    disabled={noteSaving || !noteDraft.trim()}
-                    className="text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {noteSaving ? "Saving..." : "Save note"}
-                  </button>
-                </div>
-
-                {/* Note history */}
-                {(notesLoading || noteHistory.length > 0) && (
-                  <div className="mt-5">
-                    <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
-                      Note history
-                    </div>
-                    {notesLoading ? (
-                      <p className="text-xs text-slate-400">Loading...</p>
-                    ) : (
-                      <div className="space-y-3">
-                        {noteHistory.map((n) => (
-                          <div key={n.id} className="border-l-2 border-blue-200 pl-3">
-                            <div className="text-xs text-slate-400 mb-1">
-                              {formatNoteDateTime(n.created_at)}
-                            </div>
-                            <p className="text-sm text-slate-600 whitespace-pre-wrap leading-relaxed">
-                              {n.note}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
+                  <div className="flex items-center gap-2 mt-2 flex-wrap">
+                    {selectedLead.source && <SourceBadge source={selectedLead.source} />}
+                    <StatusBadge status={selectedLead.status} />
+                    {selectedLead.urgency === "emergency" && (
+                      <UrgencyBadge urgency={selectedLead.urgency} />
                     )}
                   </div>
-                )}
+                </div>
+                <button
+                  onClick={() => setSelectedId(null)}
+                  className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors duration-150 shrink-0"
+                >
+                  <X size={16} />
+                </button>
               </div>
+            </div>
+
+            {/* Tab strip */}
+            <div className="flex border-b border-slate-100 shrink-0 overflow-x-auto">
+              {DETAIL_TABS.map(({ id, label, Icon }) => (
+                <button
+                  key={id}
+                  onClick={() => setActiveTab(id)}
+                  className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold whitespace-nowrap border-b-2 -mb-px transition-colors duration-150 ${
+                    activeTab === id
+                      ? "text-blue-600 border-blue-600"
+                      : "text-slate-400 border-transparent hover:text-slate-600 hover:border-slate-300"
+                  }`}
+                >
+                  <Icon size={12} />
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Tab content — scrollable */}
+            <div className="flex-1 overflow-y-auto px-6 py-5">
+              {activeTab === "overview" && renderOverviewTab()}
+              {activeTab === "messages" && renderMessagesTab()}
+              {activeTab === "notes" && renderNotesTab()}
+              {activeTab === "timeline" && renderTimelineTab()}
             </div>
           </div>
         )}
