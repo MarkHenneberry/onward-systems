@@ -14,6 +14,24 @@ async function checkAuth(): Promise<boolean> {
   return token === generateAdminToken();
 }
 
+export async function GET(_req: Request) {
+  if (!(await checkAuth())) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  }
+  const supabase = createServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("leads")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("[admin] fetch leads error:", error);
+    return NextResponse.json({ error: "Failed to fetch leads." }, { status: 500 });
+  }
+
+  return NextResponse.json({ data });
+}
+
 export async function POST(req: Request) {
   if (!(await checkAuth())) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });

@@ -68,6 +68,20 @@ export async function PATCH(
     updates.follow_up_date = body.follow_up_date || null;
   }
 
+  if ("has_unread_messages" in body) {
+    if (typeof body.has_unread_messages !== "boolean") {
+      return NextResponse.json({ error: "has_unread_messages must be a boolean." }, { status: 400 });
+    }
+    updates.has_unread_messages = body.has_unread_messages;
+  }
+
+  if ("needs_response" in body) {
+    if (typeof body.needs_response !== "boolean") {
+      return NextResponse.json({ error: "needs_response must be a boolean." }, { status: 400 });
+    }
+    updates.needs_response = body.needs_response;
+  }
+
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "No valid fields provided." }, { status: 400 });
   }

@@ -121,6 +121,20 @@ export async function POST(
     // Email was sent — non-fatal, continue
   }
 
+  // Stamp lead with outbound communication fields (non-fatal)
+  const now = new Date().toISOString();
+  const { error: leadUpdateErr } = await supabase
+    .from("leads")
+    .update({
+      last_message_at: now,
+      last_message_direction: "outbound",
+      has_unread_messages: false,
+      needs_response: false,
+      updated_at: now,
+    })
+    .eq("id", id);
+  if (leadUpdateErr) console.error("[admin] lead stamp error (email):", leadUpdateErr.message);
+
   // Insert activity (non-fatal)
   const { data: activity, error: actErr } = await supabase
     .from("lead_activities")

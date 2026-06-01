@@ -75,9 +75,26 @@ export async function POST(
     return NextResponse.json({ error: "Failed to save message." }, { status: 500 });
   }
 
+  // Stamp lead with communication fields based on direction (non-fatal)
+  const dir = body.direction ?? "inbound";
+  const stampNow = new Date().toISOString();
+  const leadStamp: Record<string, unknown> = {
+    last_message_at: stampNow,
+    last_message_direction: dir,
+    updated_at: stampNow,
+  };
+  if (dir === "inbound") {
+    leadStamp.has_unread_messages = true;
+    leadStamp.needs_response = true;
+  } else if (dir === "outbound") {
+    leadStamp.has_unread_messages = false;
+    leadStamp.needs_response = false;
+  }
+  const { error: leadStampErr } = await supabase.from("leads").update(leadStamp).eq("id", id);
+  if (leadStampErr) console.error("[admin] lead stamp error (message):", leadStampErr.message);
+
   // Log activity (non-fatal)
   const ch = body.channel ?? "manual";
-  const dir = body.direction ?? "inbound";
   const chLabel = ch.charAt(0).toUpperCase() + ch.slice(1);
   let actLabel: string;
   if (ch === "website" && dir === "inbound") actLabel = "Website message received";

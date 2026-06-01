@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import {
   X,
   LogOut,
@@ -18,6 +18,10 @@ import {
   Download,
   LayoutGrid,
   Send,
+  RefreshCw,
+  CheckCheck,
+  Bell,
+  Reply,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -39,6 +43,10 @@ export type Lead = {
   source: string | null;
   notes: string | null;
   follow_up_date: string | null;
+  last_message_at: string | null;
+  last_message_direction: string | null;
+  has_unread_messages: boolean;
+  needs_response: boolean;
 };
 
 type LeadNote = {
@@ -129,6 +137,12 @@ const DIRECTION_LABELS: Record<string, string> = {
   internal: "Internal",
 };
 
+const DIRECTION_ACTIVITY_LABELS: Record<string, string> = {
+  inbound: "Customer replied",
+  outbound: "You replied",
+  internal: "Internal update",
+};
+
 type ActivityStyle = { Icon: React.ElementType; bg: string; color: string };
 
 const ACTIVITY_STYLES: Record<string, ActivityStyle> = {
@@ -180,6 +194,17 @@ function formatNoteDateTime(iso: string): string {
   return `${date} at ${time}`;
 }
 
+function formatShortDateTime(iso: string | null): string {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString("en-CA", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
 function toDateInputValue(iso: string | null): string {
   if (!iso) return "";
   return iso.split("T")[0];
@@ -190,6 +215,29 @@ function isFollowUpOverdue(iso: string | null): boolean {
   const todayEnd = new Date();
   todayEnd.setHours(23, 59, 59, 999);
   return new Date(iso) <= todayEnd;
+}
+
+function isFollowUpToday(iso: string | null): boolean {
+  if (!iso) return false;
+  const today = new Date();
+  const d = new Date(iso);
+  return (
+    d.getFullYear() === today.getFullYear() &&
+    d.getMonth() === today.getMonth() &&
+    d.getDate() === today.getDate()
+  );
+}
+
+function isFollowUpPastDue(iso: string | null): boolean {
+  if (!iso) return false;
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  return new Date(iso) < todayStart;
+}
+
+function formatMonthDay(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("en-CA", { month: "short", day: "numeric" });
 }
 
 // Strips spaces, brackets, and dashes from phone numbers for tel: links.
@@ -334,6 +382,9 @@ export default function AdminDashboard({
   const [statusFilter, setStatusFilter] = useState("all");
   const [urgencyFilter, setUrgencyFilter] = useState("all");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
+  const [needsResponseFilter, setNeedsResponseFilter] = useState(false);
+  const [messagesRefreshing, setMessagesRefreshing] = useState(false);
+  const [showLogForm, setShowLogForm] = useState(false);
 
   // Notes state
   const [noteDraft, setNoteDraft] = useState("");
@@ -374,6 +425,7 @@ export default function AdminDashboard({
   });
 
   const selectedLead = leads.find((l) => l.id === selectedId) ?? null;
+  const threadRef = useRef<HTMLDivElement>(null);
 
   // Fetch notes, messages, and activities whenever a different lead is selected
   useEffect(() => {
@@ -385,6 +437,7 @@ export default function AdminDashboard({
     setActiveTab("overview");
     setEmailDraft({ subject: "Re: Your request with Onward Systems", body: "" });
     setEmailFeedback(null);
+    setShowLogForm(false);
 
     if (!selectedId) return;
 
@@ -410,12 +463,59 @@ export default function AdminDashboard({
       .finally(() => setActivitiesLoading(false));
   }, [selectedId]);
 
+  // Scroll thread container to bottom when messages load or a new one arrives
+  useEffect(() => {
+    if (activeTab === "messages" && !messagesLoading && messages.length > 0) {
+      const el = threadRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    }
+  }, [messages.length, activeTab, messagesLoading]);
+
+  // Poll leads list every 60 seconds so unread/needs-response badges stay current
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch("/api/admin/leads");
+        if (!res.ok) return;
+        const { data } = await res.json();
+        if (data) setLeads(data);
+      } catch {
+        // silent — background poll, never surface errors to the user
+      }
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Refresh activities after mutations that create server-side activity records
   function refreshActivities(id: string) {
     fetch(`/api/admin/leads/${id}/activities`)
       .then((r) => r.json())
       .then(({ data }) => setActivities(data ?? []))
       .catch((err) => console.error("[admin] failed to refresh activities:", err));
+  }
+
+  async function handleRefreshMessages() {
+    if (!selectedId) return;
+    setMessagesRefreshing(true);
+    try {
+      const [msgsRes, activRes, leadsRes] = await Promise.all([
+        fetch(`/api/admin/leads/${selectedId}/messages`),
+        fetch(`/api/admin/leads/${selectedId}/activities`),
+        fetch("/api/admin/leads"),
+      ]);
+      const [msgsJson, activJson, leadsJson] = await Promise.all([
+        msgsRes.json(),
+        activRes.json(),
+        leadsRes.json(),
+      ]);
+      if (msgsJson.data) setMessages(msgsJson.data);
+      if (activJson.data) setActivities(activJson.data);
+      if (leadsJson.data) setLeads(leadsJson.data);
+    } catch (err) {
+      console.error("[admin] refresh messages error:", err);
+    } finally {
+      setMessagesRefreshing(false);
+    }
   }
 
   // Overview stats
@@ -425,7 +525,7 @@ export default function AdminDashboard({
     return {
       total: leads.length,
       new: leads.filter((l) => l.status === "new").length,
-      emergency: leads.filter((l) => l.urgency === "emergency").length,
+      needsResponse: leads.filter((l) => l.needs_response).length,
       followUpDue: leads.filter(
         (l) => l.follow_up_date && new Date(l.follow_up_date) <= todayEnd
       ).length,
@@ -437,13 +537,14 @@ export default function AdminDashboard({
     let out = [...leads];
     if (statusFilter !== "all") out = out.filter((l) => l.status === statusFilter);
     if (urgencyFilter !== "all") out = out.filter((l) => l.urgency === urgencyFilter);
+    if (needsResponseFilter) out = out.filter((l) => l.needs_response);
     out.sort((a, b) => {
       const diff =
         new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
       return sortDir === "desc" ? -diff : diff;
     });
     return out;
-  }, [leads, statusFilter, urgencyFilter, sortDir]);
+  }, [leads, statusFilter, urgencyFilter, sortDir, needsResponseFilter]);
 
   // ── Mutations ──────────────────────────────────────────────────────────────
 
@@ -522,6 +623,20 @@ export default function AdminDashboard({
         setMessages((prev) => [...prev, data]);
         setMessageDraft({ channel: "manual", direction: "inbound", body: "" });
         refreshActivities(selectedId);
+        const loggedAt = new Date().toISOString();
+        const loggedDir = messageDraft.direction;
+        setLeads((prev) =>
+          prev.map((l) => {
+            if (l.id !== selectedId) return l;
+            return {
+              ...l,
+              last_message_at: loggedAt,
+              last_message_direction: loggedDir,
+              has_unread_messages: loggedDir === "inbound" ? true : loggedDir === "outbound" ? false : l.has_unread_messages,
+              needs_response: loggedDir === "inbound" ? true : loggedDir === "outbound" ? false : l.needs_response,
+            };
+          })
+        );
       } else {
         console.error("[admin] save message failed:", await res.text());
       }
@@ -572,6 +687,14 @@ export default function AdminDashboard({
         if (json.message) setMessages((prev) => [...prev, json.message]);
         if (json.activity) setActivities((prev) => [json.activity, ...prev]);
         setEmailFeedback({ type: "success", text: "Email sent." });
+        const sentAt = new Date().toISOString();
+        setLeads((prev) =>
+          prev.map((l) =>
+            l.id === selectedId
+              ? { ...l, last_message_at: sentAt, last_message_direction: "outbound", has_unread_messages: false, needs_response: false }
+              : l
+          )
+        );
       } else {
         setEmailFeedback({ type: "error", text: json.error ?? "Failed to send email." });
       }
@@ -617,6 +740,16 @@ export default function AdminDashboard({
     } finally {
       setAddLeadSaving(false);
     }
+  }
+
+  async function handleMarkAsRead() {
+    if (!selectedId) return;
+    await patchLead(selectedId, { has_unread_messages: false });
+  }
+
+  async function handleMarkAsHandled() {
+    if (!selectedId) return;
+    await patchLead(selectedId, { has_unread_messages: false, needs_response: false });
   }
 
   async function handleLogout() {
@@ -792,132 +925,221 @@ export default function AdminDashboard({
   }
 
   function renderMessagesTab() {
-    return (
-      <div>
-        {/* Message list */}
-        {messagesLoading ? (
-          <p className="text-xs text-slate-400 py-2">Loading...</p>
-        ) : messages.length === 0 ? (
-          <p className="text-xs text-slate-400 italic py-2 mb-4">No messages logged yet.</p>
-        ) : (
-          <div className="space-y-3 mb-5">
-            {messages.map((msg) => (
-              <div key={msg.id} className="border border-slate-100 rounded-lg p-3">
-                <div className="flex items-center gap-2 mb-2 flex-wrap">
-                  <SourceBadge source={msg.channel} />
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 font-medium">
-                    {DIRECTION_LABELS[msg.direction] ?? msg.direction}
-                  </span>
-                  <span className="text-xs text-slate-400 ml-auto">
-                    {formatNoteDateTime(msg.created_at)}
-                  </span>
-                </div>
-                <p className="text-sm text-slate-600 whitespace-pre-wrap leading-relaxed">
-                  {msg.body}
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
+    function getChannelLabel(channel: string): string {
+      const map: Record<string, string> = {
+        website: "Website", facebook: "Facebook", phone: "Phone",
+        text: "Text", email: "Email", referral: "Referral",
+        manual: "Manual Entry", other: "Other",
+      };
+      return map[channel] ?? channel;
+    }
 
-        {/* Email reply form */}
-        {selectedLead?.email && (
-          <div className="border-t border-slate-100 pt-4 space-y-2">
-            <div className="flex items-center gap-2 mb-2">
-              <Send size={12} className="text-slate-400" />
-              <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest">
-                Reply by Email
-              </div>
+    function getSenderLabel(msg: Message): string {
+      const ch = getChannelLabel(msg.channel);
+      if (msg.direction === "outbound") return `Onward Systems via ${ch}`;
+      if (msg.direction === "internal") return "Internal note";
+      const name = selectedLead?.name || selectedLead?.email || "Customer";
+      return `${name} via ${ch}`;
+    }
+
+    const hasAlert = selectedLead?.has_unread_messages || selectedLead?.needs_response;
+
+    return (
+      <div className="flex-1 min-h-0 flex flex-col">
+
+        {/* ── A: Action bar ── */}
+        <div className="shrink-0 flex items-center gap-2 flex-wrap px-5 py-2 border-b border-slate-100 bg-white">
+          {hasAlert && (
+            <>
+              <Bell size={12} className="text-teal-600 shrink-0" />
+              <span className="text-xs text-teal-700 flex-1 min-w-0">
+                {selectedLead?.has_unread_messages ? "Unread message" : "Needs response"}
+              </span>
+              {selectedLead?.has_unread_messages && (
+                <button
+                  onClick={handleMarkAsRead}
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-teal-700 hover:text-teal-900 bg-teal-50 hover:bg-teal-100 border border-teal-200 px-2 py-1 rounded-lg transition-colors duration-150"
+                >
+                  <CheckCheck size={10} />
+                  Mark as read
+                </button>
+              )}
+              {selectedLead?.needs_response && (
+                <button
+                  onClick={handleMarkAsHandled}
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600 hover:text-slate-800 bg-slate-50 hover:bg-slate-100 border border-slate-200 px-2 py-1 rounded-lg transition-colors duration-150"
+                >
+                  Mark as handled
+                </button>
+              )}
+            </>
+          )}
+          <button
+            onClick={handleRefreshMessages}
+            disabled={messagesRefreshing || messagesLoading}
+            className={`inline-flex items-center gap-1 text-xs text-slate-400 hover:text-blue-600 disabled:opacity-40 transition-colors duration-150 ${!hasAlert ? "ml-auto" : ""}`}
+          >
+            <RefreshCw size={10} className={messagesRefreshing ? "animate-spin" : ""} />
+            Refresh
+          </button>
+        </div>
+
+        {/* ── B: Conversation thread — fills all remaining height ── */}
+        <div
+          ref={threadRef}
+          className="flex-1 min-h-0 overflow-y-auto bg-slate-50 px-5 py-4"
+        >
+          {messagesLoading ? (
+            <div className="flex items-center justify-center h-full">
+              <p className="text-xs text-slate-400">Loading messages…</p>
             </div>
-            <div className="text-xs text-slate-400 mb-2">
-              To: <span className="text-slate-600">{selectedLead.email}</span>
+          ) : messages.length === 0 ? (
+            <div className="flex items-center justify-center h-full px-4">
+              <p className="text-xs text-slate-400 italic text-center leading-relaxed">
+                No messages yet. Website forms, email replies, and manually logged conversations will appear here.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {messages.map((msg) => {
+                const isOutbound = msg.direction === "outbound";
+                const isInternal = msg.direction === "internal";
+                const sender = getSenderLabel(msg);
+                const ch = getChannelLabel(msg.channel);
+                const chColor = SOURCE_COLORS[msg.channel as Source] ?? "bg-gray-100 text-gray-600";
+
+                if (isInternal) {
+                  return (
+                    <div key={msg.id} className="flex flex-col items-center px-2">
+                      <p className="text-[10px] text-slate-400 mb-1.5">{formatNoteDateTime(msg.created_at)}</p>
+                      <div className="bg-amber-50 border border-amber-100 text-amber-800 rounded-xl px-4 py-2 text-xs italic leading-relaxed max-w-[90%] text-center whitespace-pre-wrap">
+                        {msg.body}
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-1">Internal note</p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div key={msg.id} className="flex flex-col">
+                    <p className={`text-[11px] text-slate-400 mb-1 px-1 ${isOutbound ? "self-end text-right" : ""}`}>
+                      {sender}
+                    </p>
+                    <div
+                      className={`max-w-[86%] px-3.5 py-2 text-sm leading-relaxed whitespace-pre-wrap break-words ${
+                        isOutbound
+                          ? "ml-auto bg-[#0f1c40] text-white rounded-2xl rounded-tr-sm"
+                          : "bg-white border border-slate-200 text-slate-700 rounded-2xl rounded-tl-sm"
+                      }`}
+                    >
+                      {msg.body}
+                    </div>
+                    <div className={`flex items-center gap-1.5 mt-0.5 px-1 ${isOutbound ? "self-end flex-row-reverse" : ""}`}>
+                      <span className="text-[10px] text-slate-400">{formatNoteDateTime(msg.created_at)}</span>
+                      <span className="text-slate-300 text-[10px]">·</span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${chColor}`}>{ch}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* ── C: Reply by Email ── */}
+        {selectedLead?.email && (
+          <div className="shrink-0 border-t border-slate-200 bg-white px-5 py-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <Send size={11} className="text-slate-400 shrink-0" />
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-widest">Reply by Email</span>
+              <span className="text-xs text-slate-400 ml-auto truncate max-w-[180px]">{selectedLead.email}</span>
             </div>
             <input
               type="text"
               value={emailDraft.subject}
-              onChange={(e) => {
-                setEmailDraft((d) => ({ ...d, subject: e.target.value }));
-                setEmailFeedback(null);
-              }}
+              onChange={(e) => { setEmailDraft((d) => ({ ...d, subject: e.target.value })); setEmailFeedback(null); }}
               placeholder="Subject"
-              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
             />
             <textarea
               value={emailDraft.body}
-              onChange={(e) => {
-                setEmailDraft((d) => ({ ...d, body: e.target.value }));
-                setEmailFeedback(null);
-              }}
-              rows={5}
-              placeholder="Write a reply to this lead..."
-              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400 resize-none leading-relaxed"
+              onChange={(e) => { setEmailDraft((d) => ({ ...d, body: e.target.value })); setEmailFeedback(null); }}
+              rows={3}
+              placeholder="Write a reply…"
+              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400 resize-none leading-relaxed"
             />
             <div className="flex items-center justify-between gap-3">
               {emailFeedback ? (
-                <span
-                  className={`text-xs font-medium ${
-                    emailFeedback.type === "success" ? "text-green-600" : "text-red-500"
-                  }`}
-                >
+                <span className={`text-xs font-medium ${emailFeedback.type === "success" ? "text-green-600" : "text-red-500"}`}>
                   {emailFeedback.text}
                 </span>
-              ) : (
-                <span />
-              )}
+              ) : <span />}
               <button
                 onClick={handleSendEmail}
                 disabled={emailSending || !emailDraft.subject.trim() || !emailDraft.body.trim()}
                 className="inline-flex items-center gap-1.5 text-xs font-semibold bg-[#0f1c40] hover:bg-[#1a2d5a] text-white px-3 py-1.5 rounded-lg transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Send size={11} />
-                {emailSending ? "Sending..." : "Send email"}
+                {emailSending ? "Sending…" : "Send email"}
               </button>
             </div>
           </div>
         )}
 
-        {/* Add communication form */}
-        <div className="border-t border-slate-100 pt-4 space-y-2">
-          <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2">
-            Log communication
-          </div>
-          <div className="flex gap-2">
-            <select
-              value={messageDraft.channel}
-              onChange={(e) => setMessageDraft((d) => ({ ...d, channel: e.target.value }))}
-              className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
-            >
-              {SOURCE_OPTIONS.map((s) => (
-                <option key={s} value={s}>{SOURCE_LABELS[s]}</option>
-              ))}
-            </select>
-            <select
-              value={messageDraft.direction}
-              onChange={(e) => setMessageDraft((d) => ({ ...d, direction: e.target.value }))}
-              className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
-            >
-              <option value="inbound">Inbound</option>
-              <option value="outbound">Outbound</option>
-              <option value="internal">Internal</option>
-            </select>
-          </div>
-          <textarea
-            value={messageDraft.body}
-            onChange={(e) => setMessageDraft((d) => ({ ...d, body: e.target.value }))}
-            rows={3}
-            placeholder="Example: Customer messaged on Facebook asking for a driveway quote next week."
-            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400 resize-none leading-relaxed"
-          />
-          <div className="flex justify-end">
-            <button
-              onClick={handleSaveMessage}
-              disabled={messageSaving || !messageDraft.body.trim()}
-              className="text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {messageSaving ? "Saving..." : "Save message"}
-            </button>
-          </div>
+        {/* ── D: Log external conversation — collapsible ── */}
+        <div className="shrink-0 border-t border-slate-200 bg-white">
+          <button
+            onClick={() => setShowLogForm((v) => !v)}
+            className="w-full flex items-center justify-between px-5 py-2.5 text-xs font-semibold text-slate-400 hover:text-slate-600 hover:bg-slate-50 transition-colors duration-150 text-left"
+          >
+            <span>Log external conversation</span>
+            <span className="text-[10px] ml-2 shrink-0">{showLogForm ? "▲" : "▼"}</span>
+          </button>
+          {showLogForm && (
+            <div className="px-5 pb-4 pt-1 space-y-2 border-t border-slate-100">
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Use this to record a Facebook message, phone call, text, email, or other conversation that happened outside this dashboard.
+              </p>
+              <div className="flex gap-2">
+                <select
+                  value={messageDraft.channel}
+                  onChange={(e) => setMessageDraft((d) => ({ ...d, channel: e.target.value }))}
+                  className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                >
+                  {SOURCE_OPTIONS.map((s) => (
+                    <option key={s} value={s}>{SOURCE_LABELS[s]}</option>
+                  ))}
+                </select>
+                <select
+                  value={messageDraft.direction}
+                  onChange={(e) => setMessageDraft((d) => ({ ...d, direction: e.target.value }))}
+                  className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                >
+                  <option value="inbound">Customer contacted us</option>
+                  <option value="outbound">We contacted customer</option>
+                  <option value="internal">Internal note / update</option>
+                </select>
+              </div>
+              <textarea
+                value={messageDraft.body}
+                onChange={(e) => setMessageDraft((d) => ({ ...d, body: e.target.value }))}
+                rows={3}
+                placeholder="Example: Customer messaged on Facebook asking for a driveway quote next week."
+                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400 resize-none leading-relaxed"
+              />
+              <div className="flex justify-end">
+                <button
+                  onClick={handleSaveMessage}
+                  disabled={messageSaving || !messageDraft.body.trim()}
+                  className="text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {messageSaving ? "Saving…" : "Save message"}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
+
       </div>
     );
   }
@@ -1019,8 +1241,8 @@ export default function AdminDashboard({
 
   return (
     <div
-      className="flex flex-col bg-slate-50"
-      style={{ minHeight: "100vh", fontFamily: "Inter, system-ui, sans-serif" }}
+      className="flex flex-col bg-slate-50 h-screen overflow-hidden"
+      style={{ fontFamily: "Inter, system-ui, sans-serif" }}
     >
       {/* ── Header ── */}
       <header className="bg-[#0f1c40] text-white px-6 h-14 flex items-center justify-between shrink-0">
@@ -1047,7 +1269,7 @@ export default function AdminDashboard({
       </header>
 
       {/* ── Body ── */}
-      <div className="flex flex-1 overflow-hidden" style={{ height: "calc(100vh - 56px)" }}>
+      <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* ── Left panel: table ── */}
         <div
           className={`flex flex-col flex-1 overflow-hidden ${
@@ -1060,7 +1282,7 @@ export default function AdminDashboard({
               {[
                 { label: "Total leads", value: stats.total, Icon: Users, color: "text-slate-600 bg-slate-100" },
                 { label: "New", value: stats.new, Icon: Inbox, color: "text-blue-600 bg-blue-50" },
-                { label: "Emergency", value: stats.emergency, Icon: AlertTriangle, color: "text-red-600 bg-red-50" },
+                { label: "Needs response", value: stats.needsResponse, Icon: Reply, color: "text-orange-600 bg-orange-50" },
                 { label: "Follow-up due", value: stats.followUpDue, Icon: Clock, color: "text-amber-600 bg-amber-50" },
               ].map(({ label, value, Icon, color }) => (
                 <div
@@ -1111,6 +1333,16 @@ export default function AdminDashboard({
               <option value="desc">Newest first</option>
               <option value="asc">Oldest first</option>
             </select>
+            <button
+              onClick={() => setNeedsResponseFilter((v) => !v)}
+              className={`text-sm border rounded-lg px-3 py-1.5 transition-colors duration-150 ${
+                needsResponseFilter
+                  ? "bg-orange-100 text-orange-700 border-orange-300 font-medium"
+                  : "border-slate-200 text-slate-600 bg-white hover:border-slate-300"
+              }`}
+            >
+              Needs response
+            </button>
             <span className="text-xs text-slate-400 ml-auto">
               {filteredLeads.length} lead{filteredLeads.length !== 1 ? "s" : ""}
             </span>
@@ -1121,7 +1353,7 @@ export default function AdminDashboard({
             <table className="min-w-full text-sm">
               <thead className="bg-white border-b border-slate-100 sticky top-0 z-10">
                 <tr>
-                  {["Name / Business", "Help needed", "Urgency", "Status", "Date", "Contact"].map((h) => (
+                  {["Name / Business", "Help needed", "Urgency", "Status", "Activity", "Contact"].map((h) => (
                     <th
                       key={h}
                       className="px-5 py-3 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-widest whitespace-nowrap"
@@ -1150,11 +1382,20 @@ export default function AdminDashboard({
                       <td className="px-5 py-3.5">
                         <div className="font-medium text-[#0f1c40]">{lead.name}</div>
                         <div className="text-xs text-slate-400 mt-0.5">{lead.business_name}</div>
-                        {lead.source && (
-                          <div className="mt-1">
-                            <SourceBadge source={lead.source} />
-                          </div>
-                        )}
+                        <div className="flex flex-wrap items-center gap-1 mt-1">
+                          {lead.source && <SourceBadge source={lead.source} />}
+                          {lead.has_unread_messages && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-100 text-teal-700">
+                              <Bell size={8} />
+                              New message
+                            </span>
+                          )}
+                          {lead.needs_response && !lead.has_unread_messages && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-orange-100 text-orange-700">
+                              Needs response
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-5 py-3.5 max-w-[180px]">
                         <span className="text-slate-600 truncate block">{lead.help_needed || "—"}</span>
@@ -1165,18 +1406,40 @@ export default function AdminDashboard({
                       <td className="px-5 py-3.5">
                         <StatusBadge status={lead.status} />
                       </td>
-                      <td className="px-5 py-3.5 text-slate-500 text-xs whitespace-nowrap">
-                        <div>{formatDate(lead.created_at)}</div>
+                      <td className="px-5 py-3.5 text-xs whitespace-nowrap">
+                        {/* Primary: last message timestamp, or submitted date */}
+                        {lead.last_message_at ? (
+                          <>
+                            <div className="text-slate-600 font-medium">
+                              {formatShortDateTime(lead.last_message_at)}
+                            </div>
+                            <div className="text-slate-400 mt-0.5">
+                              {DIRECTION_ACTIVITY_LABELS[lead.last_message_direction ?? ""] ?? "Message"}
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="text-slate-600">{formatDate(lead.created_at)}</div>
+                            <div className="text-slate-400 mt-0.5">Submitted</div>
+                          </>
+                        )}
+                        {/* Secondary: follow-up */}
                         {lead.follow_up_date && (
                           <div
-                            className={`mt-0.5 flex items-center gap-1 ${
-                              isFollowUpOverdue(lead.follow_up_date)
-                                ? "text-amber-600 font-medium"
+                            className={`mt-1.5 flex items-center gap-1 ${
+                              isFollowUpPastDue(lead.follow_up_date)
+                                ? "text-red-500 font-medium"
+                                : isFollowUpToday(lead.follow_up_date)
+                                ? "text-amber-500 font-medium"
                                 : "text-slate-400"
                             }`}
                           >
-                            <Clock size={10} />
-                            {formatDate(lead.follow_up_date)}
+                            <Clock size={9} />
+                            {isFollowUpPastDue(lead.follow_up_date)
+                              ? `Overdue: ${formatMonthDay(lead.follow_up_date)}`
+                              : isFollowUpToday(lead.follow_up_date)
+                              ? "Due today"
+                              : `Follow-up: ${formatMonthDay(lead.follow_up_date)}`}
                           </div>
                         )}
                       </td>
@@ -1194,7 +1457,7 @@ export default function AdminDashboard({
 
         {/* ── Right panel: lead detail ── */}
         {selectedLead && (
-          <div className="w-full lg:w-[520px] bg-white border-l border-slate-100 flex flex-col overflow-hidden shrink-0">
+          <div className="w-full lg:w-[520px] bg-white border-l border-slate-100 flex flex-col overflow-hidden shrink-0 min-h-0">
             {/* Panel header — always visible */}
             <div className="px-6 pt-5 pb-4 border-b border-slate-100 shrink-0">
               <div className="flex items-start justify-between">
@@ -1240,13 +1503,16 @@ export default function AdminDashboard({
               ))}
             </div>
 
-            {/* Tab content — scrollable */}
-            <div className="flex-1 overflow-y-auto px-6 py-5">
-              {activeTab === "overview" && renderOverviewTab()}
-              {activeTab === "messages" && renderMessagesTab()}
-              {activeTab === "notes" && renderNotesTab()}
-              {activeTab === "timeline" && renderTimelineTab()}
-            </div>
+            {/* Tab content */}
+            {activeTab === "messages" ? (
+              renderMessagesTab()
+            ) : (
+              <div className="flex-1 overflow-y-auto px-6 py-5">
+                {activeTab === "overview" && renderOverviewTab()}
+                {activeTab === "notes" && renderNotesTab()}
+                {activeTab === "timeline" && renderTimelineTab()}
+              </div>
+            )}
           </div>
         )}
       </div>

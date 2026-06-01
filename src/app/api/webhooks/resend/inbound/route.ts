@@ -207,8 +207,22 @@ export async function POST(req: Request) {
 
   if (msgErr) {
     console.error("[inbound] message insert error:", msgErr.message);
-    // Don't fail the webhook — fall through to activity
+    // Don't fail the webhook — fall through to lead stamp + activity
   }
+
+  // Stamp lead as having an unread inbound message (non-fatal)
+  const inboundNow = new Date().toISOString();
+  const { error: leadStampErr } = await supabase
+    .from("leads")
+    .update({
+      last_message_at: inboundNow,
+      last_message_direction: "inbound",
+      has_unread_messages: true,
+      needs_response: true,
+      updated_at: inboundNow,
+    })
+    .eq("id", leadId);
+  if (leadStampErr) console.error("[inbound] lead stamp error:", leadStampErr.message);
 
   // Log activity
   const { error: actErr } = await supabase.from("lead_activities").insert({
