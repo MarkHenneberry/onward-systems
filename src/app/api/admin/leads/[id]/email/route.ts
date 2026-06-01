@@ -84,6 +84,8 @@ export async function POST(
   // Build reply-to so customer replies land in Resend Receiving and get matched back to this lead
   const replyTo = INBOUND_DOMAIN ? `lead-${id}@${INBOUND_DOMAIN}` : undefined;
 
+  console.log("[email] replyTo:", replyTo);
+
   // Send email via Resend
   const resend = new Resend(process.env.RESEND_API_KEY);
   const { data: emailData, error: emailErr } = await resend.emails.send({
@@ -91,7 +93,7 @@ export async function POST(
     to: lead.email,
     subject,
     html: buildEmailHtml(messageBody),
-    ...(replyTo ? { reply_to: replyTo } : {}),
+    ...(replyTo ? { replyTo } : {}),
   });
 
   if (emailErr) {
