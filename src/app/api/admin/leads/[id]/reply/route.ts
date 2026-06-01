@@ -72,7 +72,10 @@ export async function POST(
     return handleEmailReply(id, (body.subject as string).trim(), messageBody);
   }
 
-  // TODO: Add Facebook Messenger once Meta integration is connected.
+  if (channel === "facebook") {
+    return handleFacebookReply(id, messageBody);
+  }
+
   // TODO: Add SMS later if Twilio/phone handling becomes part of Tier 3.
 
   return NextResponse.json(
@@ -154,6 +157,108 @@ async function handleEmailReply(id: string, subject: string, messageBody: string
     .single();
 
   if (actErr) console.error("[reply] activity insert error:", actErr.message);
+
+  return NextResponse.json({ ok: true, message: message ?? null, activity: activity ?? null });
+}
+
+// ─── Facebook Messenger reply ─────────────────────────────────────────────────
+
+async function handleFacebookReply(id: string, messageBody: string) {
+  const pageAccessToken = process.env.META_PAGE_ACCESS_TOKEN;
+  if (!pageAccessToken) {
+    return NextResponse.json(
+      { error: "Facebook integration is not configured (META_PAGE_ACCESS_TOKEN missing)." },
+      { status: 500 }
+    );
+  }
+
+  const supabase = createServerSupabaseClient();
+
+  const { data: lead, error: leadErr } = await supabase
+    .from("leads")
+    .select("id, facebook_sender_id")
+    .eq("id", id)
+    .single();
+
+  if (leadErr || !lead) {
+    return NextResponse.json({ error: "Lead not found." }, { status: 404 });
+  }
+  if (!lead.facebook_sender_id) {
+    return NextResponse.json(
+      { error: "Lead has no Facebook sender ID — a message must be received from them first." },
+      { status: 400 }
+    );
+  }
+
+  // Send via Meta Messenger Send API
+  const sendRes = await fetch(
+    "https://graph.facebook.com/v19.0/me/messages",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${pageAccessToken}`,
+      },
+      body: JSON.stringify({
+        recipient: { id: lead.facebook_sender_id },
+        message:   { text: messageBody },
+      }),
+    }
+  );
+
+  if (!sendRes.ok) {
+    const errBody = await sendRes.text().catch(() => "");
+    console.error("[reply/facebook] Meta Send API error:", sendRes.status, errBody);
+    return NextResponse.json({ error: "Failed to send Facebook message." }, { status: 500 });
+  }
+
+  const sendData = await sendRes.json().catch(() => ({}));
+  const fbMessageId: string | null = (sendData as Record<string, unknown>).message_id as string ?? null;
+
+  const now = new Date().toISOString();
+
+  const { data: message, error: msgErr } = await supabase
+    .from("messages")
+    .insert({
+      lead_id:            id,
+      channel:            "facebook",
+      direction:          "outbound",
+      body:               messageBody,
+      external_message_id: fbMessageId,
+    })
+    .select("id, lead_id, channel, direction, body, created_at")
+    .single();
+
+  if (msgErr) console.error("[reply/facebook] Message insert error:", msgErr.message);
+
+  const { error: stampErr } = await supabase
+    .from("leads")
+    .update({
+      last_message_at:       now,
+      last_message_direction: "outbound",
+      has_unread_messages:   false,
+      needs_response:        false,
+      updated_at:            now,
+    })
+    .eq("id", id);
+  if (stampErr) console.error("[reply/facebook] Lead stamp error:", stampErr.message);
+
+  const { data: activity, error: actErr } = await supabase
+    .from("lead_activities")
+    .insert({
+      lead_id:  id,
+      type:     "message_sent",
+      label:    "Facebook reply sent",
+      metadata: {
+        channel:    "facebook",
+        message_id: fbMessageId,
+        sender_id:  lead.facebook_sender_id,
+      },
+    })
+    .select("id, lead_id, type, label, metadata, created_at")
+    .single();
+
+  if (actErr) console.error("[reply/facebook] Activity insert error:", actErr.message);
 
   return NextResponse.json({ ok: true, message: message ?? null, activity: activity ?? null });
 }

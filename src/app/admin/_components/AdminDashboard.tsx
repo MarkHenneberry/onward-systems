@@ -32,7 +32,7 @@ export type Lead = {
   updated_at: string | null;
   name: string;
   business_name: string;
-  email: string;
+  email: string | null;
   phone: string | null;
   website_or_facebook: string | null;
   business_type: string | null;
@@ -47,6 +47,7 @@ export type Lead = {
   last_message_direction: string | null;
   has_unread_messages: boolean;
   needs_response: boolean;
+  facebook_sender_id: string | null;
 };
 
 type LeadNote = {
@@ -273,7 +274,7 @@ function generateIcs(lead: Lead): string {
     `Name: ${lead.name}`,
     `Business: ${lead.business_name}`,
     lead.phone ? `Phone: ${lead.phone}` : null,
-    `Email: ${lead.email}`,
+    lead.email ? `Email: ${lead.email}` : null,
     lead.help_needed ? `Help needed: ${lead.help_needed}` : null,
     lead.message ? `Message: ${lead.message}` : null,
   ]
@@ -453,7 +454,20 @@ export default function AdminDashboard({
     setMessagesLoading(true);
     fetch(`/api/admin/leads/${selectedId}/messages`)
       .then((r) => r.json())
-      .then(({ data }) => setMessages(data ?? []))
+      .then(({ data }) => {
+        const msgs: Message[] = data ?? [];
+        setMessages(msgs);
+        // Pick the best reply channel based on the most recent inbound message
+        const lead = leads.find((l) => l.id === selectedId);
+        const lastInbound = [...msgs].reverse().find((m) => m.direction === "inbound");
+        if (lastInbound?.channel === "facebook" && lead?.facebook_sender_id) {
+          setReplyChannel("facebook");
+        } else if (lead?.email) {
+          setReplyChannel("email");
+        } else if (lead?.facebook_sender_id) {
+          setReplyChannel("facebook");
+        }
+      })
       .catch((err) => console.error("[admin] failed to load messages:", err))
       .finally(() => setMessagesLoading(false));
 
@@ -824,21 +838,25 @@ export default function AdminDashboard({
             <InfoRow
               label="Email"
               value={
-                <a
-                  href={`mailto:${selectedLead.email}`}
-                  className="text-blue-600 hover:underline"
-                >
-                  {selectedLead.email}
-                </a>
+                selectedLead.email ? (
+                  <a
+                    href={`mailto:${selectedLead.email}`}
+                    className="text-blue-600 hover:underline"
+                  >
+                    {selectedLead.email}
+                  </a>
+                ) : "—"
               }
               action={
-                <a
-                  href={`mailto:${selectedLead.email}`}
-                  className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-blue-600 border border-slate-200 hover:border-blue-400 px-2 py-1 rounded-lg transition-colors duration-150"
-                >
-                  <Mail size={11} />
-                  Email
-                </a>
+                selectedLead.email ? (
+                  <a
+                    href={`mailto:${selectedLead.email}`}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-blue-600 border border-slate-200 hover:border-blue-400 px-2 py-1 rounded-lg transition-colors duration-150"
+                  >
+                    <Mail size={11} />
+                    Email
+                  </a>
+                ) : undefined
               }
             />
             <InfoRow
@@ -1053,65 +1071,109 @@ export default function AdminDashboard({
         {/* ── C: Reply Composer ── */}
         <div className="shrink-0 border-t border-slate-200 bg-white px-5 py-3 space-y-2">
           {/* Header: "Reply via" + channel selector */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <Send size={11} className="text-slate-400 shrink-0" />
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-widest">Reply via</span>
-            <select
-              value={replyChannel}
-              onChange={(e) => { setReplyChannel(e.target.value); setEmailFeedback(null); }}
-              className="text-xs border border-slate-200 rounded-lg px-2 py-1 text-slate-600 bg-white focus:outline-none focus:border-blue-400"
-            >
-              <option value="email" disabled={!selectedLead?.email}>
-                Email{!selectedLead?.email ? " (no address)" : ""}
-              </option>
-              {/* TODO: Add Facebook Messenger once Meta integration is connected. */}
-              {/* TODO: Add SMS later if Twilio/phone handling becomes part of Tier 3. */}
-            </select>
-            {replyChannel === "email" && selectedLead?.email && (
-              <span className="text-xs text-slate-400 ml-auto truncate max-w-[160px]">
-                {selectedLead.email}
-              </span>
-            )}
-          </div>
+          {(() => {
+            const canEmail    = !!selectedLead?.email;
+            const canFacebook = !!selectedLead?.facebook_sender_id;
+            return (
+              <>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Send size={11} className="text-slate-400 shrink-0" />
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-widest">Reply via</span>
+                  <select
+                    value={replyChannel}
+                    onChange={(e) => { setReplyChannel(e.target.value); setEmailFeedback(null); }}
+                    className="text-xs border border-slate-200 rounded-lg px-2 py-1 text-slate-600 bg-white focus:outline-none focus:border-blue-400"
+                  >
+                    <option value="email" disabled={!canEmail}>
+                      Email{!canEmail ? " (no address)" : ""}
+                    </option>
+                    <option value="facebook" disabled={!canFacebook}>
+                      Facebook{!canFacebook ? " (no conversation)" : ""}
+                    </option>
+                    {/* TODO: Add SMS later if Twilio/phone handling becomes part of Tier 3. */}
+                  </select>
+                  {replyChannel === "email" && canEmail && (
+                    <span className="text-xs text-slate-400 ml-auto truncate max-w-[160px]">
+                      {selectedLead!.email}
+                    </span>
+                  )}
+                  {replyChannel === "facebook" && canFacebook && (
+                    <span className="text-xs text-slate-400 ml-auto">Facebook conversation</span>
+                  )}
+                </div>
 
-          {/* Channel-specific fields */}
-          {replyChannel === "email" && selectedLead?.email ? (
-            <>
-              <input
-                type="text"
-                value={emailDraft.subject}
-                onChange={(e) => { setEmailDraft((d) => ({ ...d, subject: e.target.value })); setEmailFeedback(null); }}
-                placeholder="Subject"
-                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
-              />
-              <textarea
-                value={emailDraft.body}
-                onChange={(e) => { setEmailDraft((d) => ({ ...d, body: e.target.value })); setEmailFeedback(null); }}
-                rows={3}
-                placeholder="Write a reply…"
-                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400 resize-none leading-relaxed"
-              />
-              <div className="flex items-center justify-between gap-3">
-                {emailFeedback ? (
-                  <span className={`text-xs font-medium ${emailFeedback.type === "success" ? "text-green-600" : "text-red-500"}`}>
-                    {emailFeedback.text}
-                  </span>
-                ) : <span />}
-                <button
-                  onClick={handleSendReply}
-                  disabled={emailSending || !emailDraft.subject.trim() || !emailDraft.body.trim()}
-                  className="inline-flex items-center gap-1.5 text-xs font-semibold bg-[#0f1c40] hover:bg-[#1a2d5a] text-white px-3 py-1.5 rounded-lg transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <Send size={11} />
-                  {emailSending ? "Sending…" : "Send reply"}
-                </button>
-              </div>
-            </>
-          ) : (
-            <p className="text-xs text-slate-400 py-1">
-              No direct reply channel available for this lead.
-            </p>
-          )}
+                {/* Email fields */}
+                {replyChannel === "email" && canEmail && (
+                  <>
+                    <input
+                      type="text"
+                      value={emailDraft.subject}
+                      onChange={(e) => { setEmailDraft((d) => ({ ...d, subject: e.target.value })); setEmailFeedback(null); }}
+                      placeholder="Subject"
+                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                    />
+                    <textarea
+                      value={emailDraft.body}
+                      onChange={(e) => { setEmailDraft((d) => ({ ...d, body: e.target.value })); setEmailFeedback(null); }}
+                      rows={3}
+                      placeholder="Write a reply…"
+                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400 resize-none leading-relaxed"
+                    />
+                    <div className="flex items-center justify-between gap-3">
+                      {emailFeedback ? (
+                        <span className={`text-xs font-medium ${emailFeedback.type === "success" ? "text-green-600" : "text-red-500"}`}>
+                          {emailFeedback.text}
+                        </span>
+                      ) : <span />}
+                      <button
+                        onClick={handleSendReply}
+                        disabled={emailSending || !emailDraft.subject.trim() || !emailDraft.body.trim()}
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold bg-[#0f1c40] hover:bg-[#1a2d5a] text-white px-3 py-1.5 rounded-lg transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <Send size={11} />
+                        {emailSending ? "Sending…" : "Send reply"}
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {/* Facebook fields */}
+                {replyChannel === "facebook" && canFacebook && (
+                  <>
+                    <textarea
+                      value={emailDraft.body}
+                      onChange={(e) => { setEmailDraft((d) => ({ ...d, body: e.target.value })); setEmailFeedback(null); }}
+                      rows={3}
+                      placeholder="Write a reply…"
+                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400 resize-none leading-relaxed"
+                    />
+                    <div className="flex items-center justify-between gap-3">
+                      {emailFeedback ? (
+                        <span className={`text-xs font-medium ${emailFeedback.type === "success" ? "text-green-600" : "text-red-500"}`}>
+                          {emailFeedback.text}
+                        </span>
+                      ) : <span />}
+                      <button
+                        onClick={handleSendReply}
+                        disabled={emailSending || !emailDraft.body.trim()}
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold bg-[#0f1c40] hover:bg-[#1a2d5a] text-white px-3 py-1.5 rounded-lg transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <Send size={11} />
+                        {emailSending ? "Sending…" : "Send reply"}
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {/* No channel available */}
+                {((replyChannel === "email" && !canEmail) || (replyChannel === "facebook" && !canFacebook)) && (
+                  <p className="text-xs text-slate-400 py-1">
+                    No direct reply channel available for this lead.
+                  </p>
+                )}
+              </>
+            );
+          })()}
         </div>
 
         {/* ── D: Log external conversation — collapsible ── */}
