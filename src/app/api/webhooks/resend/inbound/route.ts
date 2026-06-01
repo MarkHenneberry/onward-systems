@@ -32,6 +32,58 @@ function stripHtml(html: string): string {
     .trim();
 }
 
+// Strips quoted reply content from an inbound email plain-text body,
+// keeping only the customer's new text at the top.
+// Falls back to the full body if nothing survives the strip.
+function cleanEmailReply(rawBody: string): string {
+  if (!rawBody.trim()) return rawBody;
+
+  const body = rawBody.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const lines = body.split("\n");
+  const keepLines: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // Hard dividers
+    if (/^-{3,}\s*Original Message\s*-{3,}/i.test(trimmed)) break;
+    if (/^_{5,}/.test(trimmed)) break;
+
+    // "On [date], [name] wrote:" — Gmail / Apple Mail / single-line Outlook
+    if (/^On .+wrote:\s*$/i.test(trimmed)) break;
+
+    // Multi-line "On ... wrote:" — Gmail sometimes wraps the header across 2–3 lines
+    if (/^On /i.test(trimmed)) {
+      const lookahead = lines.slice(i, Math.min(i + 4, lines.length)).join(" ");
+      if (/wrote:\s*$/.test(lookahead)) break;
+    }
+
+    // Outlook-style header block: "From:" at line start after a blank line,
+    // followed by "Sent:", "To:", or "Subject:" within the next few lines.
+    // The blank-line + sibling-header guard prevents false positives in normal prose.
+    if (/^From:\s+/i.test(trimmed)) {
+      const prevBlank =
+        keepLines.length === 0 || keepLines[keepLines.length - 1].trim() === "";
+      const upcoming = lines
+        .slice(i + 1, Math.min(i + 5, lines.length))
+        .map((l) => l.trim());
+      const hasHeaderSibling = upcoming.some((l) =>
+        /^(Sent|To|Subject):\s+/i.test(l)
+      );
+      if (prevBlank && hasHeaderSibling) break;
+    }
+
+    // Lines prefixed with ">" are quoted text in most clients
+    if (/^>/.test(trimmed)) break;
+
+    keepLines.push(line);
+  }
+
+  const cleaned = keepLines.join("\n").trim();
+  return cleaned || body.trim();
+}
+
 export async function POST(req: Request) {
   // Read raw body before any parsing — needed for signature verification
   const rawBody = await req.text();
@@ -119,10 +171,13 @@ export async function POST(req: Request) {
   }
 
   // Build the message body from text or stripped HTML
-  const bodyText =
-    (emailData.text?.trim()) ||
+  const rawBodyText =
+    emailData.text?.trim() ||
     (emailData.html ? stripHtml(emailData.html) : "") ||
     "[No message body]";
+
+  // Strip quoted reply sections — keep only the customer's new text
+  const cleanedBody = cleanEmailReply(rawBodyText);
 
   const fromAddress = emailData.from ?? "";
   const subject = emailData.subject ?? "(no subject)";
@@ -141,12 +196,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, duplicate: true });
   }
 
-  // Save inbound message
+  // Save inbound message — store only the cleaned reply, not the quoted thread
   const { error: msgErr } = await supabase.from("messages").insert({
     lead_id: leadId,
     channel: "email",
     direction: "inbound",
-    body: bodyText,
+    body: cleanedBody,
     external_message_id: emailId,
   });
 
@@ -160,6 +215,7 @@ export async function POST(req: Request) {
     lead_id: leadId,
     type: "message_received",
     label: "Email reply received",
+    // TODO: store rawBodyText here if you ever need the full quoted thread for audit purposes
     metadata: { from: fromAddress, subject, email_id: emailId },
   });
 
