@@ -518,12 +518,18 @@ export default function AdminDashboard({
       .finally(() => setActivitiesLoading(false));
   }, [selectedId]);
 
+  // The conversation thread is visible either in the Inbox (any selected lead)
+  // or in the lead detail panel's Messages tab.
+  const threadVisible =
+    (topTab === "inbox" && !!selectedId) ||
+    (topTab === "leads" && activeTab === "messages");
+
   // Scroll the thread container when messages change.
-  // On initial load / manual refresh: always jump to the newest message.
-  // On Realtime updates: only scroll if the user is already within 150px of the bottom,
-  // so reading old history is not interrupted.
+  // On open / manual refresh / after sending (justLoadedRef): always jump to the newest message.
+  // On a passive Realtime update: only scroll if the user is already within 150px of the
+  // bottom, so reading older history is not interrupted.
   useEffect(() => {
-    if (activeTab !== "messages" || messagesLoading || messages.length === 0) return;
+    if (!threadVisible || messagesLoading || messages.length === 0) return;
     const el = threadRef.current;
     if (!el) return;
     if (justLoadedRef.current) {
@@ -531,9 +537,11 @@ export default function AdminDashboard({
       justLoadedRef.current = false;
     } else {
       const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-      if (distanceFromBottom < 150) el.scrollTop = el.scrollHeight;
+      if (distanceFromBottom < 150) {
+        el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+      }
     }
-  }, [messages.length, activeTab, messagesLoading]);
+  }, [messages.length, threadVisible, messagesLoading]);
 
   // Realtime: subscribe to the selected lead's messages and lead row
   useEffect(() => {
@@ -811,6 +819,7 @@ export default function AdminDashboard({
       });
       if (res.ok) {
         const { data } = await res.json();
+        justLoadedRef.current = true; // force scroll to the message we just logged
         setMessages((prev) => [...prev, data]);
         setMessageDraft({ channel: "manual", direction: "inbound", body: "" });
         refreshActivities(selectedId);
@@ -877,6 +886,7 @@ export default function AdminDashboard({
       const json = await res.json();
       if (res.ok) {
         setEmailDraft((d) => ({ ...d, body: "" }));
+        justLoadedRef.current = true; // force scroll to the message we just sent
         if (json.message) setMessages((prev) => [...prev, json.message]);
         if (json.activity) setActivities((prev) => [json.activity, ...prev]);
         setEmailFeedback({ type: "success", text: "Reply sent." });
