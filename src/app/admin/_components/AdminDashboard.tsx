@@ -23,6 +23,8 @@ import {
   CheckCheck,
   Bell,
   Reply,
+  ChevronLeft,
+  Facebook,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -381,6 +383,11 @@ export default function AdminDashboard({
   const [leads, setLeads] = useState<Lead[]>(initialLeads);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<DetailTab>("overview");
+  // Top-level view: default to Inbox when conversations need a response
+  const [topTab, setTopTab] = useState<"inbox" | "leads">(() =>
+    initialLeads.some((l) => l.needs_response) ? "inbox" : "leads"
+  );
+  const [inboxFilter, setInboxFilter] = useState<"all" | "needs_response" | "unread" | "email" | "facebook">("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [urgencyFilter, setUrgencyFilter] = useState("all");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
@@ -696,6 +703,39 @@ export default function AdminDashboard({
     });
     return out;
   }, [leads, statusFilter, urgencyFilter, sortDir, needsResponseFilter]);
+
+  // Primary conversation channel for a lead (drives the channel badge + reply default)
+  function leadChannel(lead: Lead): "facebook" | "email" | string {
+    if (lead.facebook_sender_id) return "facebook";
+    if (lead.email) return "email";
+    return lead.source ?? "other";
+  }
+
+  // Conversations = leads with at least one logged message (last_message_at set),
+  // filtered + sorted for the Inbox.
+  const conversations = useMemo(() => {
+    let out = leads.filter((l) => l.last_message_at);
+
+    if (inboxFilter === "needs_response") out = out.filter((l) => l.needs_response);
+    else if (inboxFilter === "unread") out = out.filter((l) => l.has_unread_messages);
+    else if (inboxFilter === "email") out = out.filter((l) => !l.facebook_sender_id && !!l.email);
+    else if (inboxFilter === "facebook") out = out.filter((l) => !!l.facebook_sender_id);
+
+    out.sort((a, b) => {
+      // Needs-response first
+      if (a.needs_response !== b.needs_response) return a.needs_response ? -1 : 1;
+      // Then newest activity
+      const at = new Date(a.last_message_at ?? a.created_at).getTime();
+      const bt = new Date(b.last_message_at ?? b.created_at).getTime();
+      return bt - at;
+    });
+    return out;
+  }, [leads, inboxFilter]);
+
+  const needsResponseCount = useMemo(
+    () => leads.filter((l) => l.needs_response).length,
+    [leads]
+  );
 
   // ── Mutations ──────────────────────────────────────────────────────────────
 
@@ -1773,6 +1813,168 @@ export default function AdminDashboard({
     );
   }
 
+  function renderInbox() {
+    const INBOX_FILTERS: { id: typeof inboxFilter; label: string }[] = [
+      { id: "all", label: "All" },
+      { id: "needs_response", label: "Needs response" },
+      { id: "unread", label: "Unread" },
+      { id: "email", label: "Email" },
+      { id: "facebook", label: "Facebook" },
+    ];
+
+    function convPreview(lead: Lead): string {
+      const dir = lead.last_message_direction;
+      const prefix = dir === "outbound" ? "You: " : "";
+      const text = lead.message || lead.help_needed || "";
+      if (!text) {
+        return dir === "outbound" ? "You replied" : dir === "inbound" ? "New message" : "Conversation";
+      }
+      return prefix + text;
+    }
+
+    return (
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+        {/* ── Conversation list ── */}
+        <div
+          className={`flex-col w-full lg:w-[360px] border-r border-slate-100 bg-white min-h-0 ${
+            selectedLead ? "hidden lg:flex" : "flex"
+          }`}
+        >
+          {/* Filters */}
+          <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-1.5 flex-wrap shrink-0">
+            {INBOX_FILTERS.map(({ id, label }) => (
+              <button
+                key={id}
+                onClick={() => setInboxFilter(id)}
+                className={`text-xs font-medium px-2.5 py-1 rounded-lg border transition-colors duration-150 ${
+                  inboxFilter === id
+                    ? "bg-blue-600 text-white border-blue-600"
+                    : "border-slate-200 text-slate-500 bg-white hover:border-slate-300"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* List */}
+          <div className="flex-1 overflow-y-auto min-h-0">
+            {conversations.length === 0 ? (
+              <div className="px-5 py-12 text-center">
+                <p className="text-xs text-slate-400 italic leading-relaxed">
+                  {inboxFilter === "all"
+                    ? "No conversations yet. Website inquiries, Facebook messages, and email replies will appear here."
+                    : "No conversations match this filter."}
+                </p>
+              </div>
+            ) : (
+              conversations.map((lead) => {
+                const isSel = lead.id === selectedId;
+                const ch = leadChannel(lead);
+                return (
+                  <button
+                    key={lead.id}
+                    onClick={() => setSelectedId(lead.id)}
+                    className={`w-full text-left px-4 py-3 border-b border-slate-50 transition-colors duration-100 ${
+                      isSel ? "bg-blue-50" : "hover:bg-slate-50"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-[#0f1c40] text-sm truncate flex-1 min-w-0">
+                        {lead.name}
+                      </span>
+                      <span className="text-[10px] text-slate-400 shrink-0">
+                        {lead.last_message_at ? formatShortDateTime(lead.last_message_at) : ""}
+                      </span>
+                    </div>
+                    {lead.business_name && (
+                      <div className="text-xs text-slate-400 truncate mt-0.5">{lead.business_name}</div>
+                    )}
+                    <p className="text-xs text-slate-500 truncate mt-1">{convPreview(lead)}</p>
+                    <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                      <SourceBadge source={ch} />
+                      {lead.has_unread_messages && (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-100 text-teal-700">
+                          <Bell size={8} />
+                          New
+                        </span>
+                      )}
+                      {lead.needs_response && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-orange-100 text-orange-700">
+                          Needs response
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* ── Thread + composer ── */}
+        <div
+          className={`flex-1 flex-col min-h-0 bg-slate-50 ${
+            selectedLead ? "flex" : "hidden lg:flex"
+          }`}
+        >
+          {selectedLead ? (
+            <>
+              {/* Lead quick info bar */}
+              <div className="shrink-0 bg-white border-b border-slate-100 px-5 py-3">
+                <div className="flex items-start gap-3">
+                  <button
+                    onClick={() => setSelectedId(null)}
+                    className="lg:hidden p-1 -ml-1 rounded-lg hover:bg-slate-100 text-slate-400 shrink-0"
+                    aria-label="Back to conversations"
+                  >
+                    <ChevronLeft size={18} />
+                  </button>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-[#0f1c40] text-sm">{selectedLead.name}</span>
+                      <StatusBadge status={selectedLead.status} />
+                      {selectedLead.urgency === "emergency" && <UrgencyBadge urgency={selectedLead.urgency} />}
+                    </div>
+                    <div className="flex items-center gap-3 mt-1 text-xs text-slate-400 flex-wrap">
+                      {selectedLead.email && <span className="truncate">{selectedLead.email}</span>}
+                      {selectedLead.phone && <span>{selectedLead.phone}</span>}
+                      {selectedLead.facebook_sender_id && (
+                        <span className="inline-flex items-center gap-1 text-teal-600">
+                          <Facebook size={11} /> Messenger
+                        </span>
+                      )}
+                      {selectedLead.follow_up_date && (
+                        <span className="inline-flex items-center gap-1">
+                          <Clock size={10} /> {formatMonthDay(selectedLead.follow_up_date)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => { setTopTab("leads"); setActiveTab("overview"); }}
+                    className="shrink-0 text-xs font-medium text-slate-500 hover:text-blue-600 border border-slate-200 hover:border-blue-400 px-2.5 py-1 rounded-lg transition-colors duration-150"
+                  >
+                    Open full lead
+                  </button>
+                </div>
+              </div>
+
+              {/* Reuse the existing Messages thread + channel-aware composer */}
+              {renderMessagesTab()}
+            </>
+          ) : (
+            <div className="flex-1 flex items-center justify-center px-6">
+              <p className="text-sm text-slate-400 text-center max-w-xs leading-relaxed">
+                Select a conversation to view the thread and reply.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
@@ -1804,8 +2006,37 @@ export default function AdminDashboard({
         </div>
       </header>
 
+      {/* ── Top-level nav: Inbox | Leads ── */}
+      <div className="bg-white border-b border-slate-100 px-6 flex items-center gap-1 shrink-0">
+        {([
+          { id: "inbox", label: "Inbox", Icon: Inbox },
+          { id: "leads", label: "Leads", Icon: Users },
+        ] as const).map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            onClick={() => { setTopTab(id); if (id === "leads") setSelectedId(null); }}
+            className={`flex items-center gap-1.5 px-3 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors duration-150 ${
+              topTab === id
+                ? "text-blue-600 border-blue-600"
+                : "text-slate-400 border-transparent hover:text-slate-600"
+            }`}
+          >
+            <Icon size={14} />
+            {label}
+            {id === "inbox" && needsResponseCount > 0 && (
+              <span className="ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-orange-500 text-white text-[10px] font-bold">
+                {needsResponseCount}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
       {/* ── Body ── */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
+        {topTab === "inbox" && renderInbox()}
+        {topTab === "leads" && (
+        <>
         {/* ── Left panel: table ── */}
         <div
           className={`flex flex-col flex-1 overflow-hidden ${
@@ -2050,6 +2281,8 @@ export default function AdminDashboard({
               </div>
             )}
           </div>
+        )}
+        </>
         )}
       </div>
 

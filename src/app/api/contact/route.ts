@@ -45,6 +45,7 @@ export async function POST(req: Request) {
 
     const supabase = createServerSupabaseClient();
 
+    const nowIso = new Date().toISOString();
     const payload = {
       name: name.trim(),
       business_name: business.trim(),
@@ -57,6 +58,11 @@ export async function POST(req: Request) {
       urgency,
       status: "new",
       source: "website",
+      // Stamp conversation fields so the inquiry surfaces in the admin Inbox
+      last_message_at: nowIso,
+      last_message_direction: "inbound",
+      has_unread_messages: true,
+      needs_response: true,
     };
 
     console.log("[supabase] inserting payload:", JSON.stringify(payload));
