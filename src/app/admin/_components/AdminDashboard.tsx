@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef } from "react";
+import { getSupabaseClient } from "@/lib/supabase-client";
 import {
   X,
   LogOut,
@@ -431,6 +432,7 @@ export default function AdminDashboard({
 
   const selectedLead = leads.find((l) => l.id === selectedId) ?? null;
   const threadRef = useRef<HTMLDivElement>(null);
+  const justLoadedRef = useRef(false);
 
   // Fetch notes, messages, and activities whenever a different lead is selected
   useEffect(() => {
@@ -461,6 +463,7 @@ export default function AdminDashboard({
       .then((r) => r.json())
       .then(({ data }) => {
         const msgs: Message[] = data ?? [];
+        justLoadedRef.current = true;
         setMessages(msgs);
         // Pick the best reply channel based on the most recent inbound message
         const lead = leads.find((l) => l.id === selectedId);
@@ -484,13 +487,116 @@ export default function AdminDashboard({
       .finally(() => setActivitiesLoading(false));
   }, [selectedId]);
 
-  // Scroll thread container to bottom when messages load or a new one arrives
+  // Scroll the thread container when messages change.
+  // On initial load / manual refresh: always jump to the newest message.
+  // On Realtime updates: only scroll if the user is already within 150px of the bottom,
+  // so reading old history is not interrupted.
   useEffect(() => {
-    if (activeTab === "messages" && !messagesLoading && messages.length > 0) {
-      const el = threadRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
+    if (activeTab !== "messages" || messagesLoading || messages.length === 0) return;
+    const el = threadRef.current;
+    if (!el) return;
+    if (justLoadedRef.current) {
+      el.scrollTop = el.scrollHeight;
+      justLoadedRef.current = false;
+    } else {
+      const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (distanceFromBottom < 150) el.scrollTop = el.scrollHeight;
     }
   }, [messages.length, activeTab, messagesLoading]);
+
+  // Realtime: subscribe to the selected lead's messages and lead row
+  useEffect(() => {
+    if (!selectedId) return;
+    const supabase = getSupabaseClient();
+
+    const channel = supabase
+      .channel(`lead-${selectedId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages",
+          filter: `lead_id=eq.${selectedId}`,
+        },
+        (payload) => {
+          const incoming = payload.new as Message;
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === incoming.id)) return prev; // dedup
+            return [...prev, incoming];
+          });
+          if (incoming.direction === "inbound") {
+            setLeads((prev) =>
+              prev.map((l) =>
+                l.id === selectedId
+                  ? {
+                      ...l,
+                      has_unread_messages: true,
+                      needs_response: true,
+                      last_message_at: incoming.created_at,
+                      last_message_direction: "inbound",
+                    }
+                  : l
+              )
+            );
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "leads",
+          filter: `id=eq.${selectedId}`,
+        },
+        (payload) => {
+          const updated = payload.new as Lead;
+          setLeads((prev) =>
+            prev.map((l) => (l.id === updated.id ? { ...l, ...updated } : l))
+          );
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [selectedId]);
+
+  // Realtime: global leads channel — new leads appear instantly, badge counts stay current
+  useEffect(() => {
+    const supabase = getSupabaseClient();
+
+    const channel = supabase
+      .channel("leads-global")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "leads" },
+        (payload) => {
+          const newLead = payload.new as Lead;
+          setLeads((prev) => {
+            if (prev.some((l) => l.id === newLead.id)) return prev;
+            return [newLead, ...prev];
+          });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "leads" },
+        (payload) => {
+          const updated = payload.new as Lead;
+          setLeads((prev) =>
+            prev.map((l) => (l.id === updated.id ? { ...l, ...updated } : l))
+          );
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   // Poll leads list every 60 seconds so unread/needs-response badges stay current
   useEffect(() => {
@@ -529,7 +635,7 @@ export default function AdminDashboard({
         activRes.json(),
         leadsRes.json(),
       ]);
-      if (msgsJson.data) setMessages(msgsJson.data);
+      if (msgsJson.data) { justLoadedRef.current = true; setMessages(msgsJson.data); }
       if (activJson.data) setActivities(activJson.data);
       if (leadsJson.data) setLeads(leadsJson.data);
     } catch (err) {
