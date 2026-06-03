@@ -387,6 +387,9 @@ export default function AdminDashboard({
   const [messagesRefreshing, setMessagesRefreshing] = useState(false);
   const [showLogForm, setShowLogForm] = useState(false);
   const [replyChannel, setReplyChannel] = useState("email");
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Notes state
   const [noteDraft, setNoteDraft] = useState("");
@@ -441,6 +444,8 @@ export default function AdminDashboard({
     setEmailFeedback(null);
     setShowLogForm(false);
     setReplyChannel("email");
+    setShowDeleteConfirm(false);
+    setDeleteError(null);
 
     if (!selectedId) return;
 
@@ -760,6 +765,27 @@ export default function AdminDashboard({
     }
   }
 
+  async function handleDeleteLead() {
+    if (!selectedId) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/admin/leads/${selectedId}`, { method: "DELETE" });
+      if (res.ok) {
+        setLeads((prev) => prev.filter((l) => l.id !== selectedId));
+        setSelectedId(null);
+        setShowDeleteConfirm(false);
+      } else {
+        const json = await res.json().catch(() => ({}));
+        setDeleteError((json as { error?: string }).error ?? "Failed to delete lead. Try again.");
+      }
+    } catch {
+      setDeleteError("Failed to delete lead. Try again.");
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
   async function handleMarkAsRead() {
     if (!selectedId) return;
     await patchLead(selectedId, { has_unread_messages: false });
@@ -888,7 +914,12 @@ export default function AdminDashboard({
             <InfoRow
               label="Website / FB"
               value={
-                selectedLead.website_or_facebook ? (
+                selectedLead.facebook_sender_id ? (
+                  <span className="text-slate-600">
+                    Facebook Messenger
+                    <span className="ml-1.5 text-xs text-teal-600 font-medium">· Connected</span>
+                  </span>
+                ) : selectedLead.website_or_facebook ? (
                   <a
                     href={
                       selectedLead.website_or_facebook.startsWith("http")
@@ -939,6 +970,43 @@ export default function AdminDashboard({
               <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 border border-slate-100 rounded-lg p-3 whitespace-pre-wrap">
                 {selectedLead.message}
               </p>
+            </div>
+          )}
+        </div>
+
+        {/* Danger zone */}
+        <div className="border-t border-slate-100 pt-5">
+          {!showDeleteConfirm ? (
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              className="text-xs font-medium text-red-500 hover:text-red-700 border border-red-200 hover:border-red-400 px-3 py-1.5 rounded-lg transition-colors duration-150"
+            >
+              Delete lead
+            </button>
+          ) : (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 space-y-3">
+              <p className="text-sm text-red-800 leading-relaxed">
+                Delete <span className="font-semibold">{selectedLead.name}</span> and all related messages, notes, and activity history? This cannot be undone.
+              </p>
+              {deleteError && (
+                <p className="text-xs text-red-600 font-medium">{deleteError}</p>
+              )}
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleDeleteLead}
+                  disabled={isDeleting}
+                  className="text-xs font-semibold bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isDeleting ? "Deleting…" : "Yes, delete lead"}
+                </button>
+                <button
+                  onClick={() => { setShowDeleteConfirm(false); setDeleteError(null); }}
+                  disabled={isDeleting}
+                  className="text-xs font-medium text-slate-500 hover:text-slate-700 transition-colors duration-150 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           )}
         </div>

@@ -140,3 +140,31 @@ export async function PATCH(
 
   return NextResponse.json({ ok: true });
 }
+
+export async function DELETE(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  if (!(await checkAuth())) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  }
+
+  const { id } = await params;
+
+  if (!id) {
+    return NextResponse.json({ error: "Invalid lead ID." }, { status: 400 });
+  }
+
+  const supabase = createServerSupabaseClient();
+
+  // Child records (messages, lead_notes, lead_activities) are removed via
+  // ON DELETE CASCADE on their lead_id foreign keys. See SQL instructions.
+  const { error } = await supabase.from("leads").delete().eq("id", id);
+
+  if (error) {
+    console.error("[admin] delete lead error:", error);
+    return NextResponse.json({ error: "Failed to delete lead." }, { status: 500 });
+  }
+
+  return NextResponse.json({ ok: true });
+}
