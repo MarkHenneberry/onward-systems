@@ -392,6 +392,26 @@ export default function AdminDashboard({
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  // Add-message-as-note tracking
+  const [savingNoteForMsgId, setSavingNoteForMsgId] = useState<string | null>(null);
+  const [addedNoteForMsgId, setAddedNoteForMsgId] = useState<string | null>(null);
+
+  // Inline lead editing
+  const [isEditingDetails, setIsEditingDetails] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editFeedback, setEditFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [editDraft, setEditDraft] = useState({
+    name: "",
+    business_name: "",
+    email: "",
+    phone: "",
+    website_or_facebook: "",
+    business_type: "",
+    help_needed: "",
+    message: "",
+    urgency: "normal" as "emergency" | "normal",
+  });
+
   // Notes state
   const [noteDraft, setNoteDraft] = useState("");
   const [noteSaving, setNoteSaving] = useState(false);
@@ -448,6 +468,10 @@ export default function AdminDashboard({
     setReplyChannel("email");
     setShowDeleteConfirm(false);
     setDeleteError(null);
+    setIsEditingDetails(false);
+    setEditFeedback(null);
+    setSavingNoteForMsgId(null);
+    setAddedNoteForMsgId(null);
 
     if (!selectedId) return;
 
@@ -892,6 +916,93 @@ export default function AdminDashboard({
     }
   }
 
+  async function handleAddMessageAsNote(msgId: string, noteText: string) {
+    if (!selectedId) return;
+    setSavingNoteForMsgId(msgId);
+    try {
+      const res = await fetch(`/api/admin/leads/${selectedId}/notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: noteText }),
+      });
+      if (res.ok) {
+        const { data } = await res.json();
+        setNoteHistory((prev) => [data, ...prev]);
+        setAddedNoteForMsgId(msgId);
+        setTimeout(() => setAddedNoteForMsgId((cur) => (cur === msgId ? null : cur)), 2000);
+        refreshActivities(selectedId);
+      }
+    } catch (err) {
+      console.error("[admin] add message as note error:", err);
+    } finally {
+      setSavingNoteForMsgId((cur) => (cur === msgId ? null : cur));
+    }
+  }
+
+  function handleEditDetails() {
+    if (!selectedLead) return;
+    setEditDraft({
+      name: selectedLead.name ?? "",
+      business_name: selectedLead.business_name ?? "",
+      email: selectedLead.email ?? "",
+      phone: selectedLead.phone ?? "",
+      website_or_facebook: selectedLead.website_or_facebook ?? "",
+      business_type: selectedLead.business_type ?? "",
+      help_needed: selectedLead.help_needed ?? "",
+      message: selectedLead.message ?? "",
+      urgency: selectedLead.urgency,
+    });
+    setEditFeedback(null);
+    setIsEditingDetails(true);
+  }
+
+  async function handleSaveDetails() {
+    if (!selectedId || !editDraft.name.trim()) return;
+    setEditSaving(true);
+    setEditFeedback(null);
+    try {
+      const res = await fetch(`/api/admin/leads/${selectedId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editDraft.name.trim(),
+          business_name: editDraft.business_name.trim(),
+          email: editDraft.email.trim() || null,
+          phone: editDraft.phone.trim() || null,
+          website_or_facebook: editDraft.website_or_facebook.trim() || null,
+          business_type: editDraft.business_type.trim() || null,
+          help_needed: editDraft.help_needed.trim() || null,
+          message: editDraft.message.trim() || null,
+          urgency: editDraft.urgency,
+        }),
+      });
+      if (res.ok) {
+        const saved = {
+          name: editDraft.name.trim(),
+          business_name: editDraft.business_name.trim(),
+          email: editDraft.email.trim() || null,
+          phone: editDraft.phone.trim() || null,
+          website_or_facebook: editDraft.website_or_facebook.trim() || null,
+          business_type: editDraft.business_type.trim() || null,
+          help_needed: editDraft.help_needed.trim() || null,
+          message: editDraft.message.trim() || null,
+          urgency: editDraft.urgency,
+        };
+        setLeads((prev) => prev.map((l) => l.id === selectedId ? { ...l, ...saved } : l));
+        setIsEditingDetails(false);
+        setEditFeedback({ type: "success", text: "Lead updated." });
+        setTimeout(() => setEditFeedback(null), 3000);
+      } else {
+        const json = await res.json().catch(() => ({}));
+        setEditFeedback({ type: "error", text: (json as { error?: string }).error ?? "Failed to save. Try again." });
+      }
+    } catch {
+      setEditFeedback({ type: "error", text: "Failed to save. Try again." });
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
   async function handleMarkAsRead() {
     if (!selectedId) return;
     await patchLead(selectedId, { has_unread_messages: false });
@@ -961,124 +1072,259 @@ export default function AdminDashboard({
           )}
         </div>
 
-        {/* Contact info */}
-        <div>
-          <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
-            Contact
+        {/* Edit feedback banner (success after save) */}
+        {editFeedback && !isEditingDetails && (
+          <div className={`text-xs font-medium px-3 py-2 rounded-lg border ${
+            editFeedback.type === "success"
+              ? "bg-green-50 border-green-100 text-green-700"
+              : "bg-red-50 border-red-100 text-red-600"
+          }`}>
+            {editFeedback.text}
           </div>
-          <div className="space-y-3">
-            <InfoRow
-              label="Email"
-              value={
-                selectedLead.email ? (
-                  <a
-                    href={`mailto:${selectedLead.email}`}
-                    className="text-blue-600 hover:underline"
-                  >
-                    {selectedLead.email}
-                  </a>
-                ) : "—"
-              }
-              action={
-                selectedLead.email ? (
-                  <a
-                    href={`mailto:${selectedLead.email}`}
-                    className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-blue-600 border border-slate-200 hover:border-blue-400 px-2 py-1 rounded-lg transition-colors duration-150"
-                  >
-                    <Mail size={11} />
-                    Email
-                  </a>
-                ) : undefined
-              }
-            />
-            <InfoRow
-              label="Phone"
-              value={
-                selectedLead.phone ? (
-                  <a
-                    href={`tel:${cleanPhone(selectedLead.phone)}`}
-                    className="text-slate-700 hover:text-blue-600 transition-colors duration-150"
-                  >
-                    {selectedLead.phone}
-                  </a>
-                ) : (
-                  "—"
-                )
-              }
-              action={
-                selectedLead.phone ? (
-                  <a
-                    href={`tel:${cleanPhone(selectedLead.phone)}`}
-                    className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-blue-600 border border-slate-200 hover:border-blue-400 px-2 py-1 rounded-lg transition-colors duration-150"
-                  >
-                    <Phone size={11} />
-                    Call
-                  </a>
-                ) : undefined
-              }
-            />
-            <InfoRow
-              label="Website / FB"
-              value={
-                selectedLead.facebook_sender_id ? (
-                  <span className="text-slate-600">
-                    Facebook Messenger
-                    <span className="ml-1.5 text-xs text-teal-600 font-medium">· Connected</span>
-                  </span>
-                ) : selectedLead.website_or_facebook ? (
-                  <a
-                    href={
-                      selectedLead.website_or_facebook.startsWith("http")
-                        ? selectedLead.website_or_facebook
-                        : `https://${selectedLead.website_or_facebook}`
-                    }
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 hover:underline"
-                  >
-                    {selectedLead.website_or_facebook}
-                  </a>
-                ) : (
-                  "—"
-                )
-              }
-            />
-            <InfoRow label="Business type" value={selectedLead.business_type || "—"} />
-          </div>
-        </div>
+        )}
 
-        {/* Request details */}
-        <div>
-          <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
-            Request
-          </div>
+        {isEditingDetails ? (
+          /* ── Edit mode ── */
           <div className="space-y-3">
-            <InfoRow label="Help needed" value={selectedLead.help_needed || "—"} />
-            <InfoRow label="Submitted" value={formatDate(selectedLead.created_at)} />
-            {selectedLead.updated_at && (
-              <InfoRow label="Updated" value={formatDate(selectedLead.updated_at)} />
-            )}
-            {selectedLead.follow_up_date && (
-              <InfoRow
-                label="Follow-up"
-                value={
-                  <span className={isFollowUpOverdue(selectedLead.follow_up_date) ? "text-amber-600 font-medium" : undefined}>
-                    {formatDate(selectedLead.follow_up_date)}
-                    {isFollowUpOverdue(selectedLead.follow_up_date) && " · due"}
-                  </span>
-                }
-              />
-            )}
-          </div>
-          {selectedLead.message && (
-            <div className="mt-4">
-              <div className="text-xs text-slate-400 mb-1.5">Original message</div>
-              <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 border border-slate-100 rounded-lg p-3 whitespace-pre-wrap">
-                {selectedLead.message}
-              </p>
+            <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1">
+              Edit details
             </div>
-          )}
-        </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Name <span className="text-red-400">*</span></label>
+                <input
+                  type="text"
+                  value={editDraft.name}
+                  onChange={(e) => setEditDraft((d) => ({ ...d, name: e.target.value }))}
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Business name</label>
+                <input
+                  type="text"
+                  value={editDraft.business_name}
+                  onChange={(e) => setEditDraft((d) => ({ ...d, business_name: e.target.value }))}
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Email</label>
+                <input
+                  type="email"
+                  value={editDraft.email}
+                  onChange={(e) => setEditDraft((d) => ({ ...d, email: e.target.value }))}
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Phone</label>
+                <input
+                  type="tel"
+                  value={editDraft.phone}
+                  onChange={(e) => setEditDraft((d) => ({ ...d, phone: e.target.value }))}
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Business type</label>
+                <input
+                  type="text"
+                  value={editDraft.business_type}
+                  onChange={(e) => setEditDraft((d) => ({ ...d, business_type: e.target.value }))}
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Urgency</label>
+                <select
+                  value={editDraft.urgency}
+                  onChange={(e) => setEditDraft((d) => ({ ...d, urgency: e.target.value as "emergency" | "normal" }))}
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                >
+                  <option value="normal">Normal</option>
+                  <option value="emergency">Emergency</option>
+                </select>
+              </div>
+            </div>
+
+            {!selectedLead.facebook_sender_id && (
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Website / Facebook</label>
+                <input
+                  type="text"
+                  value={editDraft.website_or_facebook}
+                  onChange={(e) => setEditDraft((d) => ({ ...d, website_or_facebook: e.target.value }))}
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                />
+              </div>
+            )}
+
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Service / Help needed</label>
+              <input
+                type="text"
+                value={editDraft.help_needed}
+                onChange={(e) => setEditDraft((d) => ({ ...d, help_needed: e.target.value }))}
+                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Message / Request</label>
+              <textarea
+                value={editDraft.message}
+                onChange={(e) => setEditDraft((d) => ({ ...d, message: e.target.value }))}
+                rows={3}
+                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400 resize-none leading-relaxed"
+              />
+            </div>
+
+            {editFeedback?.type === "error" && (
+              <p className="text-xs text-red-600 font-medium">{editFeedback.text}</p>
+            )}
+
+            <div className="flex items-center gap-3 pt-1">
+              <button
+                onClick={handleSaveDetails}
+                disabled={editSaving || !editDraft.name.trim()}
+                className="text-xs font-semibold bg-[#0f1c40] hover:bg-[#1a2d5a] text-white px-3 py-1.5 rounded-lg transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {editSaving ? "Saving…" : "Save changes"}
+              </button>
+              <button
+                onClick={() => { setIsEditingDetails(false); setEditFeedback(null); }}
+                disabled={editSaving}
+                className="text-xs font-medium text-slate-500 hover:text-slate-700 transition-colors duration-150"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* ── View mode ── */
+          <>
+            {/* Contact info */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest">
+                  Contact
+                </div>
+                <button
+                  onClick={handleEditDetails}
+                  className="text-xs font-medium text-slate-400 hover:text-blue-600 transition-colors duration-150"
+                >
+                  Edit details
+                </button>
+              </div>
+              <div className="space-y-3">
+                <InfoRow
+                  label="Email"
+                  value={
+                    selectedLead.email ? (
+                      <a href={`mailto:${selectedLead.email}`} className="text-blue-600 hover:underline">
+                        {selectedLead.email}
+                      </a>
+                    ) : "—"
+                  }
+                  action={
+                    selectedLead.email ? (
+                      <a
+                        href={`mailto:${selectedLead.email}`}
+                        className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-blue-600 border border-slate-200 hover:border-blue-400 px-2 py-1 rounded-lg transition-colors duration-150"
+                      >
+                        <Mail size={11} />
+                        Email
+                      </a>
+                    ) : undefined
+                  }
+                />
+                <InfoRow
+                  label="Phone"
+                  value={
+                    selectedLead.phone ? (
+                      <a href={`tel:${cleanPhone(selectedLead.phone)}`} className="text-slate-700 hover:text-blue-600 transition-colors duration-150">
+                        {selectedLead.phone}
+                      </a>
+                    ) : "—"
+                  }
+                  action={
+                    selectedLead.phone ? (
+                      <a
+                        href={`tel:${cleanPhone(selectedLead.phone)}`}
+                        className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-blue-600 border border-slate-200 hover:border-blue-400 px-2 py-1 rounded-lg transition-colors duration-150"
+                      >
+                        <Phone size={11} />
+                        Call
+                      </a>
+                    ) : undefined
+                  }
+                />
+                <InfoRow
+                  label="Website / FB"
+                  value={
+                    selectedLead.facebook_sender_id ? (
+                      <span className="text-slate-600">
+                        Facebook Messenger
+                        <span className="ml-1.5 text-xs text-teal-600 font-medium">· Connected</span>
+                      </span>
+                    ) : selectedLead.website_or_facebook ? (
+                      <a
+                        href={selectedLead.website_or_facebook.startsWith("http") ? selectedLead.website_or_facebook : `https://${selectedLead.website_or_facebook}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:underline"
+                      >
+                        {selectedLead.website_or_facebook}
+                      </a>
+                    ) : "—"
+                  }
+                />
+                <InfoRow label="Business type" value={selectedLead.business_type || "—"} />
+              </div>
+            </div>
+
+            {/* Request details */}
+            <div>
+              <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
+                Request
+              </div>
+              <div className="space-y-3">
+                <InfoRow label="Help needed" value={selectedLead.help_needed || "—"} />
+                <InfoRow label="Submitted" value={formatDate(selectedLead.created_at)} />
+                {selectedLead.updated_at && (
+                  <InfoRow label="Updated" value={formatDate(selectedLead.updated_at)} />
+                )}
+                {selectedLead.follow_up_date && (
+                  <InfoRow
+                    label="Follow-up"
+                    value={
+                      <span className={isFollowUpOverdue(selectedLead.follow_up_date) ? "text-amber-600 font-medium" : undefined}>
+                        {formatDate(selectedLead.follow_up_date)}
+                        {isFollowUpOverdue(selectedLead.follow_up_date) && " · due"}
+                      </span>
+                    }
+                  />
+                )}
+              </div>
+              {selectedLead.message && (
+                <div className="mt-4">
+                  <div className="text-xs text-slate-400 mb-1.5">Original message</div>
+                  <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 border border-slate-100 rounded-lg p-3 whitespace-pre-wrap">
+                    {selectedLead.message}
+                  </p>
+                </div>
+              )}
+            </div>
+          </>
+        )}
 
         {/* Danger zone */}
         <div className="border-t border-slate-100 pt-5">
@@ -1204,20 +1450,35 @@ export default function AdminDashboard({
                 const ch = getChannelLabel(msg.channel);
                 const chColor = SOURCE_COLORS[msg.channel as Source] ?? "bg-gray-100 text-gray-600";
 
+                const isSavingNote = savingNoteForMsgId === msg.id;
+                const isNoteAdded  = addedNoteForMsgId  === msg.id;
+                const noteText     = `${sender}:\n${msg.body}`;
+
                 if (isInternal) {
                   return (
-                    <div key={msg.id} className="flex flex-col items-center px-2">
+                    <div key={msg.id} className="group flex flex-col items-center px-2">
                       <p className="text-[10px] text-slate-400 mb-1.5">{formatNoteDateTime(msg.created_at)}</p>
                       <div className="bg-amber-50 border border-amber-100 text-amber-800 rounded-xl px-4 py-2 text-xs italic leading-relaxed max-w-[90%] text-center whitespace-pre-wrap">
                         {msg.body}
                       </div>
-                      <p className="text-[10px] text-slate-400 mt-1">Internal note</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <p className="text-[10px] text-slate-400">Internal note</p>
+                        <button
+                          onClick={() => handleAddMessageAsNote(msg.id, noteText)}
+                          disabled={isSavingNote || isNoteAdded}
+                          className={`text-[9px] font-medium transition-all duration-150 opacity-0 group-hover:opacity-100 focus:opacity-100 ${
+                            isNoteAdded ? "text-green-600" : "text-slate-400 hover:text-blue-600"
+                          }`}
+                        >
+                          {isSavingNote ? "Adding…" : isNoteAdded ? "✓ Added to notes" : "Add as note"}
+                        </button>
+                      </div>
                     </div>
                   );
                 }
 
                 return (
-                  <div key={msg.id} className="flex flex-col">
+                  <div key={msg.id} className="group flex flex-col">
                     <p className={`text-[11px] text-slate-400 mb-1 px-1 ${isOutbound ? "self-end text-right" : ""}`}>
                       {sender}
                     </p>
@@ -1234,6 +1495,17 @@ export default function AdminDashboard({
                       <span className="text-[10px] text-slate-400">{formatNoteDateTime(msg.created_at)}</span>
                       <span className="text-slate-300 text-[10px]">·</span>
                       <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${chColor}`}>{ch}</span>
+                      <button
+                        onClick={() => handleAddMessageAsNote(msg.id, noteText)}
+                        disabled={isSavingNote || isNoteAdded}
+                        className={`text-[9px] font-medium transition-all duration-150 opacity-0 group-hover:opacity-100 focus:opacity-100 ${
+                          isNoteAdded
+                            ? "text-green-600"
+                            : "text-slate-400 hover:text-blue-600"
+                        }`}
+                      >
+                        {isSavingNote ? "Adding…" : isNoteAdded ? "✓ Added" : "Add as note"}
+                      </button>
                     </div>
                   </div>
                 );

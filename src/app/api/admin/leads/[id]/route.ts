@@ -82,6 +82,57 @@ export async function PATCH(
     updates.needs_response = body.needs_response;
   }
 
+  // ── Detail / contact fields ────────────────────────────────────────────────
+
+  if ("name" in body) {
+    if (typeof body.name !== "string" || !body.name.trim()) {
+      return NextResponse.json({ error: "Name is required." }, { status: 400 });
+    }
+    updates.name = body.name.trim();
+  }
+
+  if ("business_name" in body) {
+    updates.business_name =
+      typeof body.business_name === "string" ? body.business_name.trim() : "";
+  }
+
+  if ("email" in body) {
+    const v = typeof body.email === "string" ? body.email.trim() : "";
+    updates.email = v || null;
+  }
+
+  if ("phone" in body) {
+    const v = typeof body.phone === "string" ? body.phone.trim() : "";
+    updates.phone = v || null;
+  }
+
+  if ("website_or_facebook" in body) {
+    const v = typeof body.website_or_facebook === "string" ? body.website_or_facebook.trim() : "";
+    updates.website_or_facebook = v || null;
+  }
+
+  if ("business_type" in body) {
+    const v = typeof body.business_type === "string" ? body.business_type.trim() : "";
+    updates.business_type = v || null;
+  }
+
+  if ("help_needed" in body) {
+    const v = typeof body.help_needed === "string" ? body.help_needed.trim() : "";
+    updates.help_needed = v || null;
+  }
+
+  if ("message" in body) {
+    const v = typeof body.message === "string" ? body.message.trim() : "";
+    updates.message = v || null;
+  }
+
+  if ("urgency" in body) {
+    if (!["emergency", "normal"].includes(body.urgency as string)) {
+      return NextResponse.json({ error: "Invalid urgency value." }, { status: 400 });
+    }
+    updates.urgency = body.urgency;
+  }
+
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "No valid fields provided." }, { status: 400 });
   }
@@ -136,6 +187,22 @@ export async function PATCH(
         metadata: { date: body.follow_up_date || null },
       });
     if (actErr) console.error("[admin] follow-up activity insert error:", actErr.message);
+  }
+
+  // Detail fields update
+  const DETAIL_FIELDS = [
+    "name", "business_name", "email", "phone",
+    "website_or_facebook", "business_type", "help_needed", "message", "urgency",
+  ];
+  const changedDetails = DETAIL_FIELDS.filter((f) => f in body);
+  if (changedDetails.length > 0) {
+    const { error: actErr } = await supabase.from("lead_activities").insert({
+      lead_id: id,
+      type: "lead_updated",
+      label: "Lead details updated",
+      metadata: { fields: changedDetails },
+    });
+    if (actErr) console.error("[admin] lead_updated activity insert error:", actErr.message);
   }
 
   return NextResponse.json({ ok: true });
