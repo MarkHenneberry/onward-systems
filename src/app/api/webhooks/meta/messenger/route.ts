@@ -132,10 +132,16 @@ async function handleMessagingEvent(
   const message     = event.message;
   const timestamp   = event.timestamp;
 
-  if (!senderId || !message) return;
+  if (!message) return;
 
-  // Skip echo messages (sent BY the page)
-  if (message.is_echo) return;
+  // Echo = a message the Page sent (from the admin hub, Business Suite, or Page
+  // Inbox). Log it as an outbound message so the hub stays complete.
+  if (message.is_echo) {
+    await handleEchoEvent(supabase, event);
+    return;
+  }
+
+  if (!senderId) return;
 
   // Skip non-text messages for now
   const text = typeof message.text === "string" ? message.text.trim() : null;
@@ -268,4 +274,136 @@ async function handleMessagingEvent(
     },
   });
   if (actErr) console.error("[meta/messenger] Activity insert error:", actErr.message);
+}
+
+// ─── Echo handler (Page-sent messages) ────────────────────────────────────────
+// Fired for messages the Page sends. These can originate from the admin hub OR
+// from Meta Business Suite / Page Inbox. We log them as outbound so the hub stays
+// complete, while deduplicating against messages the admin hub already saved.
+
+async function handleEchoEvent(
+  supabase: ReturnType<typeof createServerSupabaseClient>,
+  event: MessagingEvent
+) {
+  const message = event.message;
+  if (!message) return;
+
+  const senderId = event.sender?.id ?? null;
+  const recipientId = event.recipient?.id ?? null;
+  const pageId = process.env.META_PAGE_ID ?? null;
+  const mid = message.mid ?? null;
+  const text = typeof message.text === "string" ? message.text.trim() : null;
+
+  // Resolve the customer PSID. For echoes, sender.id is the Page and
+  // recipient.id is the customer. If sender.id matches our Page ID, the
+  // customer is recipient.id; otherwise fall back to the id that isn't the Page.
+  let customerPsid: string | null;
+  if (pageId && senderId === pageId) {
+    customerPsid = recipientId;
+  } else {
+    customerPsid = [senderId, recipientId].find((id) => id && id !== pageId) ?? recipientId;
+  }
+
+  console.log(
+    "[meta/messenger] Echo event — sender:", senderId,
+    "recipient:", recipientId,
+    "pageId:", pageId,
+    "resolved customer PSID:", customerPsid,
+    "mid:", mid
+  );
+
+  if (!text) {
+    console.log("[meta/messenger] Echo skipped — no text body");
+    return;
+  }
+  if (!customerPsid) {
+    console.warn("[meta/messenger] Echo skipped — could not resolve customer PSID");
+    return;
+  }
+
+  // 1) Dedup by Meta message id
+  if (mid) {
+    const { data: existing } = await supabase
+      .from("messages")
+      .select("id")
+      .eq("external_message_id", mid)
+      .maybeSingle();
+    if (existing) {
+      console.log("[meta/messenger] Echo skipped — duplicate mid already saved:", mid);
+      return;
+    }
+  }
+
+  // Attribute to the lead by the customer's PSID
+  const { data: lead } = await supabase
+    .from("leads")
+    .select("id")
+    .eq("facebook_sender_id", customerPsid)
+    .maybeSingle();
+
+  if (!lead) {
+    console.warn("[meta/messenger] Echo skipped — no lead for PSID:", customerPsid);
+    return;
+  }
+  const leadId = lead.id;
+  console.log("[meta/messenger] Echo matched lead:", leadId);
+
+  // 2) Fallback dedup: the admin hub saves its outbound Facebook reply without a
+  // Meta mid. Match a recent identical outbound (same lead/text) within 60s and
+  // skip — backfilling the mid so future echoes dedup cleanly.
+  const sixtySecAgo = new Date(Date.now() - 60_000).toISOString();
+  const { data: recentDup } = await supabase
+    .from("messages")
+    .select("id, external_message_id")
+    .eq("lead_id", leadId)
+    .eq("channel", "facebook")
+    .eq("direction", "outbound")
+    .eq("body", text)
+    .gte("created_at", sixtySecAgo)
+    .limit(1);
+
+  if (recentDup && recentDup.length > 0) {
+    if (mid && !recentDup[0].external_message_id) {
+      await supabase.from("messages").update({ external_message_id: mid }).eq("id", recentDup[0].id);
+    }
+    console.log("[meta/messenger] Echo skipped — matches recent admin-hub send (deduped)");
+    return;
+  }
+
+  // 3) New outbound message sent from Business Suite / Page Inbox — log it
+  const { error: msgErr } = await supabase.from("messages").insert({
+    lead_id:             leadId,
+    channel:             "facebook",
+    direction:           "outbound",
+    body:                text,
+    external_message_id: mid,
+    external_thread_id:  customerPsid,
+  });
+  if (msgErr) {
+    console.error("[meta/messenger] Echo message insert error:", msgErr.message);
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const { error: stampErr } = await supabase
+    .from("leads")
+    .update({
+      last_message_at:        now,
+      last_message_direction: "outbound",
+      has_unread_messages:    false,
+      needs_response:         false,
+      updated_at:             now,
+    })
+    .eq("id", leadId);
+  if (stampErr) console.error("[meta/messenger] Echo lead stamp error:", stampErr.message);
+
+  const { error: actErr } = await supabase.from("lead_activities").insert({
+    lead_id:  leadId,
+    type:     "message_sent",
+    label:    "Facebook message sent",
+    metadata: { message_id: mid, recipient_psid: customerPsid, source: "page_inbox" },
+  });
+  if (actErr) console.error("[meta/messenger] Echo activity insert error:", actErr.message);
+
+  console.log("[meta/messenger] Echo saved as outbound for lead:", leadId);
 }

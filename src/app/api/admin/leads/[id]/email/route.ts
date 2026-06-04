@@ -81,10 +81,12 @@ export async function POST(
     return NextResponse.json({ error: "Lead has no email address." }, { status: 400 });
   }
 
-  // Build reply-to so customer replies land in Resend Receiving and get matched back to this lead
-  const replyTo = INBOUND_DOMAIN ? `lead-${id}@${INBOUND_DOMAIN}` : undefined;
-
-  console.log("[email] replyTo:", replyTo);
+  // Build reply-to so customer replies land in Resend Receiving and get matched back to this lead.
+  // Optionally also copy the owner's normal inbox via EMAIL_REPLY_COPY_TO.
+  const trackingAddr = INBOUND_DOMAIN ? `lead-${id}@${INBOUND_DOMAIN}` : null;
+  const copyTo = process.env.EMAIL_REPLY_COPY_TO?.trim() || null;
+  const replyList = [trackingAddr, copyTo].filter(Boolean) as string[];
+  const replyTo = replyList.length === 0 ? undefined : replyList.length === 1 ? replyList[0] : replyList;
 
   // Send email via Resend
   const resend = new Resend(process.env.RESEND_API_KEY);

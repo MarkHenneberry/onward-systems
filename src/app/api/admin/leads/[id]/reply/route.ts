@@ -100,7 +100,14 @@ async function handleEmailReply(id: string, subject: string, messageBody: string
     return NextResponse.json({ error: "Lead has no email address." }, { status: 400 });
   }
 
-  const replyTo = INBOUND_DOMAIN ? `lead-${id}@${INBOUND_DOMAIN}` : undefined;
+  // Reply-To routing: always include the lead tracking address (so customer
+  // replies land in Resend Receiving and get matched back to this lead). If
+  // EMAIL_REPLY_COPY_TO is set, also CC the owner's normal inbox so replies
+  // show up there too. Resend accepts a string or an array for replyTo.
+  const trackingAddr = INBOUND_DOMAIN ? `lead-${id}@${INBOUND_DOMAIN}` : null;
+  const copyTo = process.env.EMAIL_REPLY_COPY_TO?.trim() || null;
+  const replyList = [trackingAddr, copyTo].filter(Boolean) as string[];
+  const replyTo = replyList.length === 0 ? undefined : replyList.length === 1 ? replyList[0] : replyList;
 
   const resend = new Resend(process.env.RESEND_API_KEY);
   const { data: emailData, error: emailErr } = await resend.emails.send({
