@@ -132,6 +132,7 @@ export async function POST(
       last_message_direction: "outbound",
       has_unread_messages: false,
       needs_response: false,
+      unread_count: 0,
       updated_at: now,
     })
     .eq("id", id);

@@ -63,6 +63,7 @@ export async function POST(req: Request) {
       last_message_direction: "inbound",
       has_unread_messages: true,
       needs_response: true,
+      unread_count: 1,
     };
 
     console.log("[supabase] inserting payload:", JSON.stringify(payload));

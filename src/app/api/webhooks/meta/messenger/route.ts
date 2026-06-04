@@ -248,6 +248,7 @@ async function handleMessagingEvent(
   // ── Stamp lead attention fields ────────────────────────────────────────────
 
   const now = new Date().toISOString();
+  const { data: curLead } = await supabase.from("leads").select("unread_count").eq("id", leadId).single();
   const { error: stampErr } = await supabase
     .from("leads")
     .update({
@@ -255,6 +256,7 @@ async function handleMessagingEvent(
       last_message_direction: "inbound",
       has_unread_messages:   true,
       needs_response:        true,
+      unread_count:          (curLead?.unread_count ?? 0) + 1,
       updated_at:            now,
     })
     .eq("id", leadId);
@@ -392,6 +394,7 @@ async function handleEchoEvent(
       last_message_direction: "outbound",
       has_unread_messages:    false,
       needs_response:         false,
+      unread_count:           0,
       updated_at:             now,
     })
     .eq("id", leadId);

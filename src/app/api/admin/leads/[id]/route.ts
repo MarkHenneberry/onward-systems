@@ -73,6 +73,8 @@ export async function PATCH(
       return NextResponse.json({ error: "has_unread_messages must be a boolean." }, { status: 400 });
     }
     updates.has_unread_messages = body.has_unread_messages;
+    // Mark as read / handled clears the unread counter too
+    if (body.has_unread_messages === false) updates.unread_count = 0;
   }
 
   if ("needs_response" in body) {

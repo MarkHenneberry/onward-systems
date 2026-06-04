@@ -86,9 +86,13 @@ export async function POST(
   if (dir === "inbound") {
     leadStamp.has_unread_messages = true;
     leadStamp.needs_response = true;
+    // Increment unread_count (read-modify-write; low volume)
+    const { data: cur } = await supabase.from("leads").select("unread_count").eq("id", id).single();
+    leadStamp.unread_count = (cur?.unread_count ?? 0) + 1;
   } else if (dir === "outbound") {
     leadStamp.has_unread_messages = false;
     leadStamp.needs_response = false;
+    leadStamp.unread_count = 0;
   }
   const { error: leadStampErr } = await supabase.from("leads").update(leadStamp).eq("id", id);
   if (leadStampErr) console.error("[admin] lead stamp error (message):", leadStampErr.message);

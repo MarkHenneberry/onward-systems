@@ -147,6 +147,7 @@ async function handleEmailReply(id: string, subject: string, messageBody: string
       last_message_direction: "outbound",
       has_unread_messages: false,
       needs_response: false,
+      unread_count: 0,
       updated_at: now,
     })
     .eq("id", id);
@@ -245,6 +246,7 @@ async function handleFacebookReply(id: string, messageBody: string) {
       last_message_direction: "outbound",
       has_unread_messages:   false,
       needs_response:        false,
+      unread_count:          0,
       updated_at:            now,
     })
     .eq("id", id);

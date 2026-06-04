@@ -212,6 +212,7 @@ export async function POST(req: Request) {
 
   // Stamp lead as having an unread inbound message (non-fatal)
   const inboundNow = new Date().toISOString();
+  const { data: curLead } = await supabase.from("leads").select("unread_count").eq("id", leadId).single();
   const { error: leadStampErr } = await supabase
     .from("leads")
     .update({
@@ -219,6 +220,7 @@ export async function POST(req: Request) {
       last_message_direction: "inbound",
       has_unread_messages: true,
       needs_response: true,
+      unread_count: (curLead?.unread_count ?? 0) + 1,
       updated_at: inboundNow,
     })
     .eq("id", leadId);

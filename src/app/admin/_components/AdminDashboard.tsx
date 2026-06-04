@@ -50,6 +50,7 @@ export type Lead = {
   last_message_direction: string | null;
   has_unread_messages: boolean;
   needs_response: boolean;
+  unread_count: number;
   facebook_sender_id: string | null;
 };
 
@@ -743,6 +744,8 @@ export default function AdminDashboard({
   // Messages state
   const [messages, setMessages] = useState<Message[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
+  // Latest message per lead — drives the Inbox conversation previews
+  const [latestMsgByLead, setLatestMsgByLead] = useState<Record<string, Message>>({});
   const [messageDraft, setMessageDraft] = useState({ channel: "manual", direction: "inbound", body: "" });
   const [messageSaving, setMessageSaving] = useState(false);
 
@@ -945,6 +948,44 @@ export default function AdminDashboard({
             prev.map((l) => (l.id === updated.id ? { ...l, ...updated } : l))
           );
         }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  // Records a message as the latest for its lead (keeps the newest by created_at)
+  function recordLatestMessage(m: Message) {
+    if (!m?.lead_id) return;
+    setLatestMsgByLead((prev) => {
+      const cur = prev[m.lead_id];
+      if (cur && new Date(cur.created_at).getTime() > new Date(m.created_at).getTime()) return prev;
+      return { ...prev, [m.lead_id]: m };
+    });
+  }
+
+  // Load the latest message per lead on mount (for Inbox previews), then keep it
+  // current with a global realtime subscription on message inserts.
+  useEffect(() => {
+    fetch("/api/admin/messages/latest")
+      .then((r) => r.json())
+      .then(({ data }) => {
+        if (!data) return;
+        const map: Record<string, Message> = {};
+        for (const m of data as Message[]) map[m.lead_id] = m;
+        setLatestMsgByLead(map);
+      })
+      .catch((err) => console.error("[admin] failed to load latest messages:", err));
+
+    const supabase = getSupabaseClient();
+    const channel = supabase
+      .channel("messages-global")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "messages" },
+        (payload) => recordLatestMessage(payload.new as Message)
       )
       .subscribe();
 
@@ -1248,8 +1289,9 @@ export default function AdminDashboard({
     return out;
   }, [leads, inboxFilter]);
 
-  const needsResponseCount = useMemo(
-    () => leads.filter((l) => l.needs_response).length,
+  // Total unread inbound messages across all leads (sum, not lead count)
+  const totalUnread = useMemo(
+    () => leads.reduce((sum, l) => sum + (l.unread_count ?? 0), 0),
     [leads]
   );
 
@@ -1340,6 +1382,7 @@ export default function AdminDashboard({
         const { data } = await res.json();
         justLoadedRef.current = true; // force scroll to the message we just logged
         setMessages((prev) => [...prev, data]);
+        recordLatestMessage(data);
         setMessageDraft({ channel: "manual", direction: "inbound", body: "" });
         refreshActivities(selectedId);
         const loggedAt = new Date().toISOString();
@@ -1353,6 +1396,7 @@ export default function AdminDashboard({
               last_message_direction: loggedDir,
               has_unread_messages: loggedDir === "inbound" ? true : loggedDir === "outbound" ? false : l.has_unread_messages,
               needs_response: loggedDir === "inbound" ? true : loggedDir === "outbound" ? false : l.needs_response,
+              unread_count: loggedDir === "inbound" ? (l.unread_count ?? 0) + 1 : loggedDir === "outbound" ? 0 : l.unread_count,
             };
           })
         );
@@ -1406,14 +1450,14 @@ export default function AdminDashboard({
       if (res.ok) {
         setEmailDraft((d) => ({ ...d, body: "" }));
         justLoadedRef.current = true; // force scroll to the message we just sent
-        if (json.message) setMessages((prev) => [...prev, json.message]);
+        if (json.message) { setMessages((prev) => [...prev, json.message]); recordLatestMessage(json.message); }
         if (json.activity) setActivities((prev) => [json.activity, ...prev]);
         setEmailFeedback({ type: "success", text: "Reply sent." });
         const sentAt = new Date().toISOString();
         setLeads((prev) =>
           prev.map((l) =>
             l.id === selectedId
-              ? { ...l, last_message_at: sentAt, last_message_direction: "outbound", has_unread_messages: false, needs_response: false }
+              ? { ...l, last_message_at: sentAt, last_message_direction: "outbound", has_unread_messages: false, needs_response: false, unread_count: 0 }
               : l
           )
         );
@@ -1574,12 +1618,12 @@ export default function AdminDashboard({
 
   async function handleMarkAsRead() {
     if (!selectedId) return;
-    await patchLead(selectedId, { has_unread_messages: false });
+    await patchLead(selectedId, { has_unread_messages: false, unread_count: 0 });
   }
 
   async function handleMarkAsHandled() {
     if (!selectedId) return;
-    await patchLead(selectedId, { has_unread_messages: false, needs_response: false });
+    await patchLead(selectedId, { has_unread_messages: false, needs_response: false, unread_count: 0 });
   }
 
   async function handleLogout() {
@@ -2786,14 +2830,16 @@ export default function AdminDashboard({
       { id: "facebook", label: "Facebook" },
     ];
 
+    // Preview = the most recent message for the lead (prefixed with "You: " when
+    // outbound), falling back to the original request if no messages exist yet.
     function convPreview(lead: Lead): string {
-      const dir = lead.last_message_direction;
-      const prefix = dir === "outbound" ? "You: " : "";
-      const text = lead.message || lead.help_needed || "";
-      if (!text) {
-        return dir === "outbound" ? "You replied" : dir === "inbound" ? "New message" : "Conversation";
+      const latest = latestMsgByLead[lead.id];
+      if (latest) {
+        const prefix = latest.direction === "outbound" ? "You: " : "";
+        return (prefix + latest.body).trim() || "Conversation";
       }
-      return prefix + text;
+      const text = lead.message || lead.help_needed || "";
+      return text || "Conversation";
     }
 
     return (
@@ -2844,11 +2890,19 @@ export default function AdminDashboard({
                     }`}
                   >
                     <div className="flex items-center gap-2">
-                      <span className="font-medium text-[#0f1c40] text-sm truncate flex-1 min-w-0">
+                      <span className="font-medium text-[#0f1c40] text-sm truncate min-w-0">
                         {lead.name}
                       </span>
-                      <span className="text-[10px] text-slate-400 shrink-0">
-                        {lead.last_message_at ? formatShortDateTime(lead.last_message_at) : ""}
+                      {lead.unread_count > 0 && (
+                        <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-orange-500 text-white text-[10px] font-bold shrink-0">
+                          {lead.unread_count}
+                        </span>
+                      )}
+                      <span className="text-[10px] text-slate-400 shrink-0 ml-auto">
+                        {(() => {
+                          const at = latestMsgByLead[lead.id]?.created_at ?? lead.last_message_at;
+                          return at ? formatShortDateTime(at) : "";
+                        })()}
                       </span>
                     </div>
                     {lead.business_name && (
@@ -2988,9 +3042,9 @@ export default function AdminDashboard({
           >
             <Icon size={14} />
             {label}
-            {id === "inbox" && needsResponseCount > 0 && (
+            {id === "inbox" && totalUnread > 0 && (
               <span className="ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-orange-500 text-white text-[10px] font-bold">
-                {needsResponseCount}
+                {totalUnread}
               </span>
             )}
           </button>
