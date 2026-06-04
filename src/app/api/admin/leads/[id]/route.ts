@@ -127,7 +127,7 @@ export async function PATCH(
   }
 
   if ("urgency" in body) {
-    if (!["emergency", "normal"].includes(body.urgency as string)) {
+    if (!["emergency", "priority", "normal"].includes(body.urgency as string)) {
       return NextResponse.json({ error: "Invalid urgency value." }, { status: 400 });
     }
     updates.urgency = body.urgency;
@@ -166,6 +166,23 @@ export async function PATCH(
         metadata: { from: prevStatus, to: body.status },
       });
     if (actErr) console.error("[admin] status activity insert error:", actErr.message);
+  }
+
+  // Urgency change — client passes _prev_urgency; only log when it actually changed
+  if ("urgency" in body) {
+    const prevUrgency = typeof body._prev_urgency === "string" ? body._prev_urgency : null;
+    if (prevUrgency && prevUrgency !== body.urgency) {
+      const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+      const { error: actErr } = await supabase
+        .from("lead_activities")
+        .insert({
+          lead_id: id,
+          type: "urgency_changed",
+          label: `Urgency changed from ${cap(prevUrgency)} to ${cap(body.urgency)}`,
+          metadata: { from: prevUrgency, to: body.urgency },
+        });
+      if (actErr) console.error("[admin] urgency activity insert error:", actErr.message);
+    }
   }
 
   // Follow-up date change

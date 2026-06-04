@@ -41,7 +41,7 @@ export type Lead = {
   business_type: string | null;
   help_needed: string | null;
   message: string | null;
-  urgency: "emergency" | "normal";
+  urgency: "emergency" | "priority" | "normal";
   status: "new" | "contacted" | "quoted" | "booked" | "completed" | "lost";
   source: string | null;
   notes: string | null;
@@ -76,6 +76,39 @@ type Activity = {
   label: string;
   metadata: Record<string, unknown> | null;
   created_at: string;
+};
+
+type ScheduleEvent = {
+  id: string;
+  lead_id: string | null;
+  title: string;
+  description: string | null;
+  event_type: string;
+  start_at: string;
+  end_at: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string | null;
+  lead: { name: string; email: string | null; phone: string | null; source: string | null } | null;
+};
+
+// A normalized calendar row — either a real schedule_event or a synthetic
+// follow-up derived from a lead's follow_up_date.
+type CalItem = {
+  key: string;
+  kind: "event" | "followup";
+  eventId: string | null;   // schedule_events.id (null for follow-ups)
+  leadId: string | null;
+  title: string;
+  eventType: string;
+  startAt: string;
+  endAt: string | null;
+  description: string | null;
+  status: string;
+  leadName: string;
+  leadEmail: string | null;
+  leadPhone: string | null;
+  leadSource: string | null;
 };
 
 type DetailTab = "overview" | "messages" | "notes" | "timeline";
@@ -157,6 +190,8 @@ const ACTIVITY_STYLES: Record<string, ActivityStyle> = {
   follow_up_set: { Icon: Calendar, bg: "bg-green-50", color: "text-green-500" },
   calendar_exported: { Icon: Download, bg: "bg-slate-100", color: "text-slate-500" },
   urgency_changed: { Icon: AlertTriangle, bg: "bg-red-50", color: "text-red-500" },
+  schedule_event_created: { Icon: Clock, bg: "bg-blue-50", color: "text-blue-500" },
+  schedule_event_completed: { Icon: CheckCheck, bg: "bg-green-50", color: "text-green-500" },
 };
 
 const DEFAULT_ACTIVITY_STYLE: ActivityStyle = {
@@ -315,6 +350,242 @@ function downloadIcs(lead: Lead) {
   URL.revokeObjectURL(url);
 }
 
+const EVENT_TYPE_LABELS: Record<string, string> = {
+  follow_up: "Follow-up",
+  call: "Call",
+  estimate: "Estimate",
+  job: "Job",
+  reminder: "Reminder",
+  other: "Other",
+};
+
+const EVENT_TYPE_COLORS: Record<string, string> = {
+  follow_up: "bg-blue-100 text-blue-700",
+  call: "bg-purple-100 text-purple-700",
+  estimate: "bg-amber-100 text-amber-700",
+  job: "bg-green-100 text-green-700",
+  reminder: "bg-slate-100 text-slate-600",
+  other: "bg-gray-100 text-gray-600",
+};
+
+const EVENT_STATUS_COLORS: Record<string, string> = {
+  scheduled: "bg-blue-50 text-blue-600",
+  completed: "bg-green-100 text-green-700",
+  cancelled: "bg-slate-100 text-slate-500",
+  missed: "bg-red-100 text-red-600",
+};
+
+// Converts an ISO timestamp to ICS UTC format: YYYYMMDDTHHMMSSZ
+function icsUtcStamp(iso: string): string {
+  return new Date(iso).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+}
+
+// Builds an .ics calendar event for a single schedule item.
+//
+// TODO: Add a private calendar subscription feed so owners can subscribe from
+// Apple/Google/Outlook without OAuth (one read-only URL streaming all events).
+// Not built yet — this generates a single downloadable event for now.
+function generateEventIcs(item: CalItem): string {
+  const start = icsUtcStamp(item.startAt);
+  // Default to a 30-minute block when no end time is set
+  const end = item.endAt
+    ? icsUtcStamp(item.endAt)
+    : icsUtcStamp(new Date(new Date(item.startAt).getTime() + 30 * 60 * 1000).toISOString());
+  const dtstamp = icsUtcStamp(new Date().toISOString());
+
+  const descLines = [
+    item.leadName ? `Lead: ${item.leadName}` : null,
+    item.leadPhone ? `Phone: ${item.leadPhone}` : null,
+    item.leadEmail ? `Email: ${item.leadEmail}` : null,
+    item.leadSource ? `Source: ${item.leadSource}` : null,
+    `Type: ${EVENT_TYPE_LABELS[item.eventType] ?? item.eventType}`,
+    item.description ? `Notes: ${item.description}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Onward Systems//Admin//EN",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    "BEGIN:VEVENT",
+    `UID:event-${item.eventId ?? item.leadId ?? item.key}@onwardsystems.ca`,
+    `DTSTAMP:${dtstamp}`,
+    `DTSTART:${start}`,
+    `DTEND:${end}`,
+    `SUMMARY:${escapeIcsText(item.title)}`,
+    `DESCRIPTION:${escapeIcsText(descLines)}`,
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\r\n");
+}
+
+function downloadEventIcs(item: CalItem) {
+  const content = generateEventIcs(item);
+  const blob = new Blob([content], { type: "text/calendar;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${item.title.replace(/\s+/g, "-").slice(0, 40)}.ics`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ─── Time parsing (12-hour, business-friendly) ────────────────────────────────
+
+// Parses loose user time input into a 12-hour { h, m }. Accepts:
+//   "9" → 9:00, "12" → 12:00, "930" → 9:30, "325" → 3:25,
+//   "0325"/"1230" → 3:25/12:30, "3:25" → 3:25.
+// Returns null if it can't parse a valid 1–12 hour / 0–59 minute time.
+function parseTime12(raw: string): { h: number; m: number } | null {
+  if (!raw) return null;
+  let s = raw.trim().toLowerCase().replace(/[ap]\.?m\.?/g, "").trim();
+  let h: number, m: number;
+  if (s.includes(":")) {
+    const [hp, mp] = s.split(":");
+    h = parseInt(hp, 10);
+    m = parseInt(mp || "0", 10);
+  } else {
+    s = s.replace(/\D/g, "");
+    if (!s) return null;
+    if (s.length <= 2) { h = parseInt(s, 10); m = 0; }
+    else if (s.length === 3) { h = parseInt(s.slice(0, 1), 10); m = parseInt(s.slice(1), 10); }
+    else { const d = s.slice(-4); h = parseInt(d.slice(0, 2), 10); m = parseInt(d.slice(2), 10); }
+  }
+  if (isNaN(h) || isNaN(m) || m < 0 || m > 59) return null;
+  if (h === 0) h = 12;
+  if (h < 1 || h > 12) return null;
+  return { h, m };
+}
+
+function formatTime12(p: { h: number; m: number }): string {
+  return `${p.h}:${String(p.m).padStart(2, "0")}`;
+}
+
+// Converts a parsed 12-hour time + meridiem to a 24-hour "HH:MM" string.
+function to24hFrom12(p: { h: number; m: number }, ampm: string): string {
+  let h = p.h % 12; // 12 → 0
+  if (ampm === "PM") h += 12;
+  return `${String(h).padStart(2, "0")}:${String(p.m).padStart(2, "0")}`;
+}
+
+// Common clock times (12-hour, 15-min increments) for the dropdown.
+const COMMON_TIMES: string[] = (() => {
+  const out: string[] = [];
+  for (const h of [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]) {
+    for (const m of [0, 15, 30, 45]) out.push(`${h}:${String(m).padStart(2, "0")}`);
+  }
+  return out;
+})();
+
+// Friendly time input: text field (type 325 → 3:25) + AM/PM select + a clock
+// dropdown of common times. Formats on Enter, Tab, and blur; selects all on focus.
+function TimeField({
+  time, ampm, onTimeChange, onAmpmChange,
+}: {
+  time: string;
+  ampm: string;
+  onTimeChange: (v: string) => void;
+  onAmpmChange: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const ampmRef = useRef<HTMLSelectElement>(null);
+  const activeOptRef = useRef<HTMLButtonElement>(null);
+
+  const normalized = (() => { const p = parseTime12(time); return p ? formatTime12(p) : null; })();
+
+  function normalize() {
+    if (normalized && normalized !== time) onTimeChange(normalized);
+  }
+
+  // When the dropdown opens, scroll the matching option into view
+  useEffect(() => {
+    if (open) activeOptRef.current?.scrollIntoView({ block: "center" });
+  }, [open]);
+
+  function pick(value: string) {
+    onTimeChange(value);
+    setOpen(false);
+    // Move to AM/PM next — natural keyboard flow
+    setTimeout(() => ampmRef.current?.focus(), 0);
+  }
+
+  return (
+    <div className="flex gap-2">
+      <div className="relative flex-1 min-w-0">
+        <input
+          ref={inputRef}
+          type="text"
+          inputMode="numeric"
+          maxLength={5}
+          value={time}
+          onChange={(e) => onTimeChange(e.target.value)}
+          onFocus={(e) => e.target.select()}
+          onClick={(e) => e.currentTarget.select()}
+          onBlur={() => { normalize(); setOpen(false); }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              normalize();
+              setOpen(false);
+              ampmRef.current?.focus();
+            } else if (e.key === "Escape" && open) {
+              e.preventDefault();
+              setOpen(false);
+            }
+          }}
+          placeholder="9:00"
+          className="w-full text-sm border border-slate-200 rounded-lg pl-3 pr-8 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label="Common times"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => setOpen((v) => !v)}
+          className="absolute right-1 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-slate-400 hover:text-blue-600 hover:bg-slate-100 transition-colors duration-150"
+        >
+          <Clock size={13} />
+        </button>
+        {open && (
+          <div className="absolute z-20 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-52 overflow-y-auto">
+            {COMMON_TIMES.map((opt) => {
+              const isActive = opt === normalized;
+              return (
+                <button
+                  key={opt}
+                  type="button"
+                  ref={isActive ? activeOptRef : undefined}
+                  onMouseDown={(e) => { e.preventDefault(); pick(opt); }}
+                  className={`w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 transition-colors duration-100 ${
+                    isActive ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-600"
+                  }`}
+                >
+                  {opt}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      <select
+        ref={ampmRef}
+        value={ampm}
+        onChange={(e) => onAmpmChange(e.target.value)}
+        className="text-sm border border-slate-200 rounded-lg px-2 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+      >
+        <option value="AM">AM</option>
+        <option value="PM">PM</option>
+      </select>
+    </div>
+  );
+}
+
 // ─── Small UI pieces ──────────────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: string }) {
@@ -332,6 +603,14 @@ function UrgencyBadge({ urgency }: { urgency: string }) {
       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
         <AlertTriangle size={10} />
         Emergency
+      </span>
+    );
+  }
+  if (urgency === "priority") {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+        <AlertTriangle size={10} />
+        Priority
       </span>
     );
   }
@@ -384,10 +663,46 @@ export default function AdminDashboard({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<DetailTab>("overview");
   // Top-level view: default to Inbox when conversations need a response
-  const [topTab, setTopTab] = useState<"inbox" | "leads">(() =>
+  const [topTab, setTopTab] = useState<"inbox" | "leads" | "calendar">(() =>
     initialLeads.some((l) => l.needs_response) ? "inbox" : "leads"
   );
   const [inboxFilter, setInboxFilter] = useState<"all" | "needs_response" | "unread" | "email" | "facebook">("all");
+
+  // Calendar / schedule
+  const [scheduleEvents, setScheduleEvents] = useState<ScheduleEvent[]>([]);
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [calendarFilter, setCalendarFilter] = useState<"today" | "week" | "upcoming" | "overdue" | "all">("upcoming");
+  const [calendarView, setCalendarView] = useState<"calendar" | "schedule">("calendar");
+  const [calMonth, setCalMonth] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
+  const [selectedEvent, setSelectedEvent] = useState<CalItem | null>(null);
+  const [eventOpenedFrom, setEventOpenedFrom] = useState<"calendar" | "lead">("calendar");
+  const [confirmDeleteEvent, setConfirmDeleteEvent] = useState(false);
+  const [showAddEvent, setShowAddEvent] = useState(false);
+  const [showScheduleForm, setShowScheduleForm] = useState(false);
+  const [eventSaving, setEventSaving] = useState(false);
+  const emptyEventForm = {
+    lead_id: "",
+    title: "",
+    event_type: "follow_up",
+    start_date: "",
+    start_time: "9:00",
+    start_ampm: "AM",
+    end_date: "",
+    end_time: "",
+    end_ampm: "AM",
+    description: "",
+    status: "scheduled",
+  };
+  const [eventForm, setEventForm] = useState(emptyEventForm);
+  const [eventError, setEventError] = useState<string | null>(null);
+  const [leadQuery, setLeadQuery] = useState("");
+  const [showLeadDropdown, setShowLeadDropdown] = useState(false);
+  const addEventLeadRef = useRef<HTMLInputElement>(null);
+  const addEventStartRef = useRef<HTMLInputElement>(null);
+  const scheduleTitleRef = useRef<HTMLInputElement>(null);
+  // When the Add modal is opened from a message, lead+description are prefilled,
+  // so focus the start date instead of the lead search.
+  const focusEventStartRef = useRef(false);
   const [statusFilter, setStatusFilter] = useState("all");
   const [urgencyFilter, setUrgencyFilter] = useState("all");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
@@ -416,7 +731,7 @@ export default function AdminDashboard({
     business_type: "",
     help_needed: "",
     message: "",
-    urgency: "normal" as "emergency" | "normal",
+    urgency: "normal" as "emergency" | "priority" | "normal",
   });
 
   // Notes state
@@ -453,7 +768,7 @@ export default function AdminDashboard({
     help_needed: "",
     message: "",
     source: "manual",
-    urgency: "normal" as "emergency" | "normal",
+    urgency: "normal" as "emergency" | "priority" | "normal",
     status: "new" as Lead["status"],
   });
 
@@ -479,6 +794,7 @@ export default function AdminDashboard({
     setEditFeedback(null);
     setSavingNoteForMsgId(null);
     setAddedNoteForMsgId(null);
+    setShowScheduleForm(false);
 
     if (!selectedId) return;
 
@@ -660,6 +976,198 @@ export default function AdminDashboard({
       .catch((err) => console.error("[admin] failed to refresh activities:", err));
   }
 
+  // ── Schedule / Calendar ──────────────────────────────────────────────────────
+
+  function fetchScheduleEvents() {
+    setScheduleLoading(true);
+    fetch("/api/admin/schedule")
+      .then((r) => r.json())
+      .then(({ data }) => setScheduleEvents(data ?? []))
+      .catch((err) => console.error("[admin] failed to load schedule:", err))
+      .finally(() => setScheduleLoading(false));
+  }
+
+  // Load schedule events once on mount
+  useEffect(() => {
+    fetchScheduleEvents();
+  }, []);
+
+  function openAddEvent(prefillLeadId?: string, prefillDate?: string) {
+    const lead = prefillLeadId ? leads.find((l) => l.id === prefillLeadId) : null;
+    setEventForm({
+      ...emptyEventForm,
+      lead_id: prefillLeadId ?? "",
+      title: lead ? `Follow up with ${lead.business_name || lead.name}` : "",
+      start_date: prefillDate ?? (lead?.follow_up_date ? toDateInputValue(lead.follow_up_date) : ""),
+    });
+    setLeadQuery(lead ? lead.name : "");
+    setShowLeadDropdown(false);
+    setEventError(null);
+    focusEventStartRef.current = false;
+    setShowAddEvent(true);
+  }
+
+  // Opens the Add Scheduled Item modal prefilled from a conversation message.
+  function openScheduleFromMessage(msg: Message) {
+    const lead = leads.find((l) => l.id === msg.lead_id);
+    const channelLabel = SOURCE_LABELS[msg.channel as Source] ?? msg.channel;
+    setEventForm({
+      ...emptyEventForm,
+      lead_id: msg.lead_id,
+      title: lead ? `Follow up with ${lead.business_name || lead.name}` : "Scheduled item",
+      description: `From ${channelLabel} message:\n${msg.body}`,
+      event_type: "follow_up",
+    });
+    setLeadQuery(lead ? lead.name : "");
+    setShowLeadDropdown(false);
+    setEventError(null);
+    focusEventStartRef.current = true;
+    setShowAddEvent(true);
+  }
+
+  // Focus a sensible field when the Add modal opens
+  useEffect(() => {
+    if (showAddEvent) {
+      const id = setTimeout(() => {
+        if (focusEventStartRef.current) addEventStartRef.current?.focus();
+        else addEventLeadRef.current?.focus();
+      }, 30);
+      return () => clearTimeout(id);
+    }
+  }, [showAddEvent]);
+
+  // Focus the title field when the inline schedule form opens
+  useEffect(() => {
+    if (showScheduleForm) {
+      const id = setTimeout(() => scheduleTitleRef.current?.focus(), 30);
+      return () => clearTimeout(id);
+    }
+  }, [showScheduleForm]);
+
+  async function handleDeleteEvent(eventId: string) {
+    const leadId = scheduleEvents.find((e) => e.id === eventId)?.lead_id ?? null;
+    try {
+      const res = await fetch(`/api/admin/schedule/${eventId}`, { method: "DELETE" });
+      if (res.ok) {
+        setScheduleEvents((prev) => prev.filter((e) => e.id !== eventId));
+        setSelectedEvent(null);
+        setConfirmDeleteEvent(false);
+        // Schedule-related timeline entries were removed server-side — refresh if that lead is open
+        if (selectedId && leadId === selectedId) refreshActivities(selectedId);
+      } else {
+        console.error("[admin] delete event failed:", await res.text());
+      }
+    } catch (err) {
+      console.error("[admin] delete event error:", err);
+    }
+  }
+
+  async function handleSaveEvent(_fromInline: boolean) {
+    setEventError(null);
+    if (!eventForm.title.trim()) { setEventError("Title is required."); return; }
+    if (!eventForm.start_date) { setEventError("Start date is required."); return; }
+
+    const startParsed = parseTime12(eventForm.start_time);
+    if (!startParsed) { setEventError("Enter a valid start time, like 9:00."); return; }
+    const start24 = to24hFrom12(startParsed, eventForm.start_ampm);
+    const startAt = new Date(`${eventForm.start_date}T${start24}`).toISOString();
+
+    // End is optional. Only build it if an end time (or end date) was provided.
+    let endAt: string | null = null;
+    if (eventForm.end_time.trim()) {
+      const endParsed = parseTime12(eventForm.end_time);
+      if (!endParsed) { setEventError("Enter a valid end time, like 2:30."); return; }
+      const end24 = to24hFrom12(endParsed, eventForm.end_ampm);
+      const endDate = eventForm.end_date || eventForm.start_date;
+      endAt = new Date(`${endDate}T${end24}`).toISOString();
+      if (new Date(endAt) < new Date(startAt)) {
+        setEventError("End time is before the start time.");
+        return;
+      }
+    } else if (eventForm.end_date) {
+      endAt = new Date(`${eventForm.end_date}T${start24}`).toISOString();
+    }
+
+    setEventSaving(true);
+    try {
+      const res = await fetch("/api/admin/schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lead_id: eventForm.lead_id || null,
+          title: eventForm.title.trim(),
+          event_type: eventForm.event_type,
+          start_at: startAt,
+          end_at: endAt,
+          description: eventForm.description.trim() || null,
+          status: eventForm.status,
+        }),
+      });
+      if (res.ok) {
+        const { data } = await res.json();
+        setScheduleEvents((prev) => [...prev, data].sort(
+          (a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime()
+        ));
+        if (eventForm.lead_id) refreshActivities(eventForm.lead_id);
+        setShowAddEvent(false);
+        setShowScheduleForm(false);
+        setEventForm(emptyEventForm);
+        setLeadQuery("");
+        setEventError(null);
+      } else {
+        setEventError("Couldn't save the item. Please try again.");
+        console.error("[admin] save event failed:", await res.text());
+      }
+    } catch (err) {
+      console.error("[admin] save event error:", err);
+      setEventError("Couldn't save the item. Please try again.");
+    } finally {
+      setEventSaving(false);
+    }
+  }
+
+  async function handleEventStatus(eventId: string, status: string) {
+    try {
+      const res = await fetch(`/api/admin/schedule/${eventId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (res.ok) {
+        const { data } = await res.json();
+        setScheduleEvents((prev) => prev.map((e) => (e.id === eventId ? data : e)));
+        setSelectedEvent((cur) => (cur && cur.eventId === eventId ? { ...cur, status } : cur));
+        // Completing logs a timeline activity server-side — refresh if that lead is open
+        if (status === "completed" && selectedId && data?.lead_id === selectedId) {
+          refreshActivities(selectedId);
+        }
+      }
+    } catch (err) {
+      console.error("[admin] update event status error:", err);
+    }
+  }
+
+  // Converts a ScheduleEvent into the CalItem shape used by the event detail modal,
+  // so the lead Overview list can open the same modal (with complete/delete/.ics).
+  function scheduleEventToCalItem(ev: ScheduleEvent): CalItem {
+    return {
+      key: `event-${ev.id}`,
+      kind: "event",
+      eventId: ev.id,
+      leadId: ev.lead_id,
+      title: ev.title,
+      eventType: ev.event_type,
+      startAt: ev.start_at,
+      endAt: ev.end_at,
+      description: ev.description,
+      status: ev.status,
+      leadName: ev.lead?.name ?? "—",
+      leadEmail: ev.lead?.email ?? null,
+      leadPhone: ev.lead?.phone ?? null,
+      leadSource: ev.lead?.source ?? null,
+    };
+  }
+
   async function handleRefreshMessages() {
     if (!selectedId) return;
     setMessagesRefreshing(true);
@@ -771,6 +1279,17 @@ export default function AdminDashboard({
       id,
       { status: status as Lead["status"] },
       { _prev_status: prevStatus }
+    );
+    if (ok) refreshActivities(id);
+  }
+
+  async function handleUrgencyChange(id: string, urgency: string) {
+    const prevUrgency = selectedLead?.urgency;
+    if (prevUrgency === urgency) return;
+    const ok = await patchLead(
+      id,
+      { urgency: urgency as Lead["urgency"] },
+      { _prev_urgency: prevUrgency }
     );
     if (ok) refreshActivities(id);
   }
@@ -1090,13 +1609,19 @@ export default function AdminDashboard({
               ))}
             </select>
           </div>
-          <div>
+          <div className="flex-1 min-w-[140px]">
             <label className="text-xs font-semibold text-slate-400 uppercase tracking-widest block mb-1.5">
               Urgency
             </label>
-            <div className="py-2">
-              <UrgencyBadge urgency={selectedLead.urgency} />
-            </div>
+            <select
+              value={selectedLead.urgency}
+              onChange={(e) => handleUrgencyChange(selectedLead.id, e.target.value)}
+              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+            >
+              <option value="normal">Normal</option>
+              <option value="priority">Priority</option>
+              <option value="emergency">Emergency</option>
+            </select>
           </div>
         </div>
 
@@ -1111,15 +1636,118 @@ export default function AdminDashboard({
             onChange={(e) => handleFollowUpChange(selectedLead.id, e.target.value)}
             className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
           />
-          {selectedLead.follow_up_date && (
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
+            {selectedLead.follow_up_date && (
+              <button
+                onClick={handleCalendarExport}
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-blue-600 border border-slate-200 hover:border-blue-400 px-3 py-1.5 rounded-lg transition-colors duration-150"
+              >
+                <Calendar size={12} />
+                Add follow-up to calendar
+              </button>
+            )}
             <button
-              onClick={handleCalendarExport}
-              className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-blue-600 border border-slate-200 hover:border-blue-400 px-3 py-1.5 rounded-lg transition-colors duration-150"
+              onClick={() => {
+                if (!showScheduleForm) {
+                  setEventForm({
+                    ...emptyEventForm,
+                    lead_id: selectedLead.id,
+                    title: `Follow up with ${selectedLead.business_name || selectedLead.name}`,
+                    start_date: selectedLead.follow_up_date ? toDateInputValue(selectedLead.follow_up_date) : "",
+                  });
+                  setEventError(null);
+                }
+                setShowScheduleForm((v) => !v);
+              }}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-blue-600 border border-slate-200 hover:border-blue-400 px-3 py-1.5 rounded-lg transition-colors duration-150"
             >
-              <Calendar size={12} />
-              Add follow-up to calendar
+              <Clock size={12} />
+              Schedule item
             </button>
+          </div>
+
+          {/* Inline schedule form */}
+          {showScheduleForm && (
+            <div className="mt-3 bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+              <input
+                ref={scheduleTitleRef}
+                type="text"
+                value={eventForm.title}
+                onChange={(e) => setEventForm((f) => ({ ...f, title: e.target.value }))}
+                placeholder="Title"
+                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+              />
+              <div className="flex gap-2">
+                <select
+                  value={eventForm.event_type}
+                  onChange={(e) => setEventForm((f) => ({ ...f, event_type: e.target.value }))}
+                  className="flex-1 min-w-0 text-sm border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                >
+                  {Object.entries(EVENT_TYPE_LABELS).map(([v, label]) => (
+                    <option key={v} value={v}>{label}</option>
+                  ))}
+                </select>
+                <input type="date" value={eventForm.start_date} onChange={(e) => setEventForm((f) => ({ ...f, start_date: e.target.value }))} className="text-sm border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400" />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400 w-10 shrink-0">Time</span>
+                <TimeField
+                  time={eventForm.start_time}
+                  ampm={eventForm.start_ampm}
+                  onTimeChange={(v) => { setEventForm((f) => ({ ...f, start_time: v })); setEventError(null); }}
+                  onAmpmChange={(v) => setEventForm((f) => ({ ...f, start_ampm: v }))}
+                />
+              </div>
+              {eventError && (
+                <p className="text-xs text-red-600 font-medium">{eventError}</p>
+              )}
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setShowScheduleForm(false)} className="text-xs font-medium text-slate-500 hover:text-slate-700 transition-colors duration-150">Cancel</button>
+                <button
+                  onClick={() => handleSaveEvent(true)}
+                  disabled={eventSaving || !eventForm.title.trim() || !eventForm.start_date}
+                  className="text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {eventSaving ? "Saving…" : "Save item"}
+                </button>
+              </div>
+            </div>
           )}
+
+          {/* Scheduled items for this lead */}
+          {(() => {
+            const leadEvents = scheduleEvents
+              .filter((e) => e.lead_id === selectedLead.id)
+              .sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
+            if (leadEvents.length === 0) return null;
+            return (
+              <div className="mt-4">
+                <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2">Scheduled items</div>
+                <div className="space-y-1.5">
+                  {leadEvents.map((ev) => {
+                    const t = new Date(ev.start_at);
+                    const when = t.toLocaleDateString("en-CA", { month: "short", day: "numeric" })
+                      + " · " + t.toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit", hour12: true });
+                    return (
+                      <button
+                        key={ev.id}
+                        onClick={() => { setSelectedEvent(scheduleEventToCalItem(ev)); setEventOpenedFrom("lead"); setConfirmDeleteEvent(false); }}
+                        className={`w-full text-left flex items-center gap-2 bg-white border border-slate-100 rounded-lg px-3 py-2 hover:border-slate-300 transition-colors duration-150 ${
+                          ev.status === "completed" || ev.status === "cancelled" ? "opacity-50" : ""
+                        }`}
+                      >
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 ${EVENT_TYPE_COLORS[ev.event_type] ?? "bg-gray-100 text-gray-600"}`}>
+                          {EVENT_TYPE_LABELS[ev.event_type] ?? ev.event_type}
+                        </span>
+                        <span className={`text-sm text-slate-700 flex-1 min-w-0 truncate ${ev.status === "completed" ? "line-through" : ""}`}>{ev.title}</span>
+                        <span className="text-[10px] text-slate-400 shrink-0">{when}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Edit feedback banner (success after save) */}
@@ -1196,10 +1824,11 @@ export default function AdminDashboard({
                 <label className="text-xs text-slate-400 block mb-1">Urgency</label>
                 <select
                   value={editDraft.urgency}
-                  onChange={(e) => setEditDraft((d) => ({ ...d, urgency: e.target.value as "emergency" | "normal" }))}
+                  onChange={(e) => setEditDraft((d) => ({ ...d, urgency: e.target.value as "emergency" | "priority" | "normal" }))}
                   className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
                 >
                   <option value="normal">Normal</option>
+                  <option value="priority">Priority</option>
                   <option value="emergency">Emergency</option>
                 </select>
               </div>
@@ -1522,6 +2151,12 @@ export default function AdminDashboard({
                         >
                           {isSavingNote ? "Adding…" : isNoteAdded ? "✓ Added to notes" : "Add as note"}
                         </button>
+                        <button
+                          onClick={() => openScheduleFromMessage(msg)}
+                          className="text-[9px] font-medium text-slate-400 hover:text-blue-600 transition-all duration-150 opacity-0 group-hover:opacity-100 focus:opacity-100"
+                        >
+                          Schedule
+                        </button>
                       </div>
                     </div>
                   );
@@ -1555,6 +2190,12 @@ export default function AdminDashboard({
                         }`}
                       >
                         {isSavingNote ? "Adding…" : isNoteAdded ? "✓ Added" : "Add as note"}
+                      </button>
+                      <button
+                        onClick={() => openScheduleFromMessage(msg)}
+                        className="text-[9px] font-medium text-slate-400 hover:text-blue-600 transition-all duration-150 opacity-0 group-hover:opacity-100 focus:opacity-100"
+                      >
+                        Schedule
                       </button>
                     </div>
                   </div>
@@ -1823,6 +2464,319 @@ export default function AdminDashboard({
     );
   }
 
+  function renderCalendar() {
+    const now = new Date();
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
+    const weekEnd = new Date(todayStart); weekEnd.setDate(weekEnd.getDate() + 7);
+
+    // Build normalized items: schedule_events + synthetic follow-ups from leads.follow_up_date
+    const items: CalItem[] = [];
+
+    for (const ev of scheduleEvents) {
+      items.push({
+        key: `event-${ev.id}`,
+        kind: "event",
+        eventId: ev.id,
+        leadId: ev.lead_id,
+        title: ev.title,
+        eventType: ev.event_type,
+        startAt: ev.start_at,
+        endAt: ev.end_at,
+        description: ev.description,
+        status: ev.status,
+        leadName: ev.lead?.name ?? "—",
+        leadEmail: ev.lead?.email ?? null,
+        leadPhone: ev.lead?.phone ?? null,
+        leadSource: ev.lead?.source ?? null,
+      });
+    }
+
+    // Leads that already have a schedule_event of type follow_up — skip the synthetic one
+    const leadsWithFollowUpEvent = new Set(
+      scheduleEvents.filter((e) => e.event_type === "follow_up" && e.lead_id).map((e) => e.lead_id)
+    );
+    for (const lead of leads) {
+      if (!lead.follow_up_date) continue;
+      if (leadsWithFollowUpEvent.has(lead.id)) continue;
+      // Follow-up dates are date-only; treat as 9:00 AM local
+      const startAt = new Date(`${toDateInputValue(lead.follow_up_date)}T09:00`).toISOString();
+      items.push({
+        key: `followup-${lead.id}`,
+        kind: "followup",
+        eventId: null,
+        leadId: lead.id,
+        title: `Follow up with ${lead.business_name || lead.name}`,
+        eventType: "follow_up",
+        startAt,
+        endAt: null,
+        description: lead.help_needed,
+        status: "scheduled",
+        leadName: lead.name,
+        leadEmail: lead.email,
+        leadPhone: lead.phone,
+        leadSource: lead.source,
+      });
+    }
+
+    // Apply filter
+    const filtered = items.filter((it) => {
+      const t = new Date(it.startAt);
+      const active = it.status === "scheduled" || it.status === "missed";
+      switch (calendarFilter) {
+        case "today":    return active && t >= todayStart && t <= todayEnd;
+        case "week":     return active && t >= todayStart && t <= weekEnd;
+        case "upcoming": return active && t >= todayStart;
+        case "overdue":  return active && t < now;
+        case "all":      return true;
+      }
+    });
+
+    filtered.sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime());
+
+    // Group by calendar day
+    const groups: { label: string; items: CalItem[] }[] = [];
+    const tomorrow = new Date(todayStart); tomorrow.setDate(tomorrow.getDate() + 1);
+    function dayLabel(iso: string): string {
+      const d = new Date(iso);
+      const ds = new Date(d); ds.setHours(0, 0, 0, 0);
+      if (ds.getTime() === todayStart.getTime()) return "Today";
+      if (ds.getTime() === tomorrow.getTime()) return "Tomorrow";
+      return d.toLocaleDateString("en-CA", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+    }
+    for (const it of filtered) {
+      const label = dayLabel(it.startAt);
+      const existing = groups.find((g) => g.label === label);
+      if (existing) existing.items.push(it);
+      else groups.push({ label, items: [it] });
+    }
+
+    const CAL_FILTERS: { id: typeof calendarFilter; label: string }[] = [
+      { id: "today", label: "Today" },
+      { id: "week", label: "This week" },
+      { id: "upcoming", label: "Upcoming" },
+      { id: "overdue", label: "Overdue" },
+      { id: "all", label: "All" },
+    ];
+
+    const isFaded = (it: CalItem) => it.status === "completed" || it.status === "cancelled";
+
+    // ── Month grid for the calendar view ──────────────────────────────────────
+    const gridYear = calMonth.getFullYear();
+    const gridMonth = calMonth.getMonth();
+    const firstOfMonth = new Date(gridYear, gridMonth, 1);
+    const gridStart = new Date(firstOfMonth);
+    gridStart.setDate(1 - firstOfMonth.getDay()); // back up to the Sunday on/before the 1st
+    const dayCells: Date[] = Array.from({ length: 42 }, (_, i) => {
+      const d = new Date(gridStart);
+      d.setDate(gridStart.getDate() + i);
+      return d;
+    });
+    function itemsOnDay(day: Date): CalItem[] {
+      return items
+        .filter((it) => {
+          const d = new Date(it.startAt);
+          return d.getFullYear() === day.getFullYear() && d.getMonth() === day.getMonth() && d.getDate() === day.getDate();
+        })
+        .sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime());
+    }
+    const monthLabel = calMonth.toLocaleDateString("en-CA", { month: "long", year: "numeric" });
+
+    return (
+      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+        {/* Sub-nav + actions */}
+        <div className="px-6 py-3 bg-white border-b border-slate-100 flex items-center gap-2 flex-wrap shrink-0">
+          <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
+            {(["calendar", "schedule"] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => setCalendarView(v)}
+                className={`text-xs font-semibold px-3 py-1.5 transition-colors duration-150 ${
+                  calendarView === v ? "bg-blue-600 text-white" : "bg-white text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                {v === "calendar" ? "Calendar" : "Schedule"}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={fetchScheduleEvents}
+            disabled={scheduleLoading}
+            className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-blue-600 disabled:opacity-40 transition-colors duration-150 ml-1"
+          >
+            <RefreshCw size={11} className={scheduleLoading ? "animate-spin" : ""} />
+            Refresh
+          </button>
+          <button
+            onClick={() => openAddEvent()}
+            className="ml-auto flex items-center gap-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg transition-colors duration-200"
+          >
+            + Add scheduled item
+          </button>
+        </div>
+
+        {/* ── Calendar (month) view ── */}
+        {calendarView === "calendar" && (
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            {/* Month nav */}
+            <div className="px-6 py-2.5 flex items-center gap-2 border-b border-slate-100 shrink-0 bg-white">
+              <button onClick={() => setCalMonth(new Date(gridYear, gridMonth - 1, 1))} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 transition-colors duration-150" aria-label="Previous month">
+                <ChevronLeft size={16} />
+              </button>
+              <button onClick={() => setCalMonth(new Date(gridYear, gridMonth + 1, 1))} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 transition-colors duration-150 rotate-180" aria-label="Next month">
+                <ChevronLeft size={16} />
+              </button>
+              <span className="text-sm font-semibold text-[#0f1c40] ml-1">{monthLabel}</span>
+              <button onClick={() => { const d = new Date(); setCalMonth(new Date(d.getFullYear(), d.getMonth(), 1)); }} className="ml-2 text-xs font-medium text-slate-500 hover:text-blue-600 border border-slate-200 hover:border-blue-400 px-2.5 py-1 rounded-lg transition-colors duration-150">
+                Today
+              </button>
+            </div>
+
+            {/* Weekday headers */}
+            <div className="grid grid-cols-7 border-b border-slate-100 shrink-0 bg-white">
+              {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+                <div key={d} className="px-2 py-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-widest text-center">{d}</div>
+              ))}
+            </div>
+
+            {/* Day cells */}
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              <div className="grid grid-cols-7 auto-rows-fr h-full">
+                {dayCells.map((day, i) => {
+                  const inMonth = day.getMonth() === gridMonth;
+                  const isToday = day.getFullYear() === now.getFullYear() && day.getMonth() === now.getMonth() && day.getDate() === now.getDate();
+                  const dayItems = itemsOnDay(day);
+                  return (
+                    <div
+                      key={i}
+                      onClick={() => openAddEvent(undefined, `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`)}
+                      className={`border-b border-r border-slate-100 min-h-[90px] p-1 cursor-pointer transition-colors duration-100 ${
+                        inMonth ? "bg-white hover:bg-slate-50" : "bg-slate-50/60"
+                      }`}
+                    >
+                      <div className={`text-[11px] font-medium mb-1 px-1 inline-flex items-center justify-center ${
+                        isToday ? "bg-blue-600 text-white rounded-full w-5 h-5" : inMonth ? "text-slate-500" : "text-slate-300"
+                      }`}>
+                        {day.getDate()}
+                      </div>
+                      <div className="space-y-0.5">
+                        {dayItems.slice(0, 3).map((it) => {
+                          const t = new Date(it.startAt);
+                          const time = t.toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit", hour12: true });
+                          const overdue = it.status === "scheduled" && t < now;
+                          return (
+                            <button
+                              key={it.key}
+                              onClick={(e) => { e.stopPropagation(); setSelectedEvent(it); setEventOpenedFrom("calendar"); setConfirmDeleteEvent(false); }}
+                              className={`w-full text-left rounded px-1 py-0.5 text-[10px] leading-tight truncate border-l-2 ${
+                                EVENT_TYPE_COLORS[it.eventType] ?? "bg-gray-100 text-gray-600"
+                              } ${isFaded(it) ? "opacity-50 line-through" : ""} ${overdue ? "ring-1 ring-red-300" : ""}`}
+                              style={{ borderLeftColor: "currentColor" }}
+                              title={it.title}
+                            >
+                              <span className="font-semibold">{time.replace(/\s/g, "")}</span> {it.title}
+                            </button>
+                          );
+                        })}
+                        {dayItems.length > 3 && (
+                          <div className="text-[10px] text-slate-400 px-1">+{dayItems.length - 3} more</div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Schedule (list) view ── */}
+        {calendarView === "schedule" && (
+          <>
+            <div className="px-6 py-2.5 bg-white border-b border-slate-100 flex items-center gap-2 flex-wrap shrink-0">
+              {CAL_FILTERS.map(({ id, label }) => (
+                <button
+                  key={id}
+                  onClick={() => setCalendarFilter(id)}
+                  className={`text-xs font-medium px-2.5 py-1 rounded-lg border transition-colors duration-150 ${
+                    calendarFilter === id
+                      ? "bg-blue-600 text-white border-blue-600"
+                      : "border-slate-200 text-slate-500 bg-white hover:border-slate-300"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="flex-1 overflow-y-auto min-h-0 px-6 py-5">
+              {scheduleLoading && items.length === 0 ? (
+                <p className="text-xs text-slate-400 py-8 text-center">Loading schedule…</p>
+              ) : groups.length === 0 ? (
+                <p className="text-sm text-slate-400 italic py-12 text-center leading-relaxed">
+                  No scheduled items{calendarFilter !== "all" ? " for this view" : " yet"}. Use
+                  <span className="font-medium"> + Add scheduled item</span> to create follow-ups, calls, estimates, and jobs.
+                </p>
+              ) : (
+                <div className="space-y-6 max-w-3xl">
+                  {groups.map((group) => (
+                    <div key={group.label}>
+                      <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2">{group.label}</div>
+                      <div className="space-y-2">
+                        {group.items.map((it) => {
+                          const t = new Date(it.startAt);
+                          const time = t.toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit", hour12: true });
+                          const isOverdue = it.status === "scheduled" && t < now;
+                          return (
+                            <button
+                              key={it.key}
+                              onClick={() => { setSelectedEvent(it); setEventOpenedFrom("calendar"); setConfirmDeleteEvent(false); }}
+                              className={`w-full text-left bg-white border border-slate-100 rounded-xl p-3.5 shadow-sm flex gap-3 hover:border-slate-300 transition-colors duration-150 ${
+                                isFaded(it) ? "opacity-50" : ""
+                              }`}
+                            >
+                              <div className="shrink-0 w-16 text-right">
+                                <div className={`text-sm font-semibold ${isOverdue ? "text-red-500" : "text-[#0f1c40]"}`}>{time}</div>
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className={`text-sm font-medium text-[#0f1c40] ${it.status === "completed" ? "line-through" : ""}`}>{it.title}</span>
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${EVENT_TYPE_COLORS[it.eventType] ?? "bg-gray-100 text-gray-600"}`}>
+                                    {EVENT_TYPE_LABELS[it.eventType] ?? it.eventType}
+                                  </span>
+                                  {it.kind === "event" && (
+                                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${EVENT_STATUS_COLORS[it.status] ?? "bg-slate-100 text-slate-500"}`}>
+                                      {it.status.charAt(0).toUpperCase() + it.status.slice(1)}
+                                    </span>
+                                  )}
+                                  {it.kind === "followup" && (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-slate-100 text-slate-400">From follow-up date</span>
+                                  )}
+                                  {isOverdue && (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-red-100 text-red-600">Overdue</span>
+                                  )}
+                                </div>
+                                {it.leadName && it.leadName !== "—" && (
+                                  <div className="text-xs text-slate-400 mt-0.5">Lead: {it.leadName}</div>
+                                )}
+                                {it.description && (
+                                  <p className="text-xs text-slate-500 mt-1 leading-relaxed line-clamp-2">{it.description}</p>
+                                )}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
   function renderInbox() {
     const INBOX_FILTERS: { id: typeof inboxFilter; label: string }[] = [
       { id: "all", label: "All" },
@@ -2021,6 +2975,7 @@ export default function AdminDashboard({
         {([
           { id: "inbox", label: "Inbox", Icon: Inbox },
           { id: "leads", label: "Leads", Icon: Users },
+          { id: "calendar", label: "Calendar", Icon: Calendar },
         ] as const).map(({ id, label, Icon }) => (
           <button
             key={id}
@@ -2045,6 +3000,7 @@ export default function AdminDashboard({
       {/* ── Body ── */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {topTab === "inbox" && renderInbox()}
+        {topTab === "calendar" && renderCalendar()}
         {topTab === "leads" && (
         <>
         {/* ── Left panel: table ── */}
@@ -2100,6 +3056,7 @@ export default function AdminDashboard({
             >
               <option value="all">All urgency</option>
               <option value="emergency">Emergency</option>
+              <option value="priority">Priority</option>
               <option value="normal">Normal</option>
             </select>
             <select
@@ -2234,7 +3191,7 @@ export default function AdminDashboard({
 
         {/* ── Right panel: lead detail ── */}
         {selectedLead && (
-          <div className="w-full lg:w-[520px] bg-white border-l border-slate-100 flex flex-col overflow-hidden shrink-0 min-h-0">
+          <div className="w-full lg:w-[560px] xl:w-[620px] bg-white border-l border-slate-100 flex flex-col overflow-hidden shrink-0 min-h-0">
             {/* Panel header — always visible */}
             <div className="px-6 pt-5 pb-4 border-b border-slate-100 shrink-0">
               <div className="flex items-start justify-between">
@@ -2295,6 +3252,276 @@ export default function AdminDashboard({
         </>
         )}
       </div>
+
+      {/* ── Event Detail Modal ── */}
+      {selectedEvent && (() => {
+        const ev = selectedEvent;
+        const t = new Date(ev.startAt);
+        const whenLabel = t.toLocaleDateString("en-CA", { weekday: "long", month: "long", day: "numeric", year: "numeric" })
+          + " · " + t.toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit", hour12: true });
+        const isReal = ev.kind === "event" && !!ev.eventId;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40" onClick={() => { setSelectedEvent(null); setConfirmDeleteEvent(false); }} />
+            <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md">
+              <div className="flex items-start justify-between px-6 py-4 border-b border-slate-100">
+                <div className="flex-1 min-w-0 pr-3">
+                  <div className="font-semibold text-[#0f1c40] leading-tight">{ev.title}</div>
+                  <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${EVENT_TYPE_COLORS[ev.eventType] ?? "bg-gray-100 text-gray-600"}`}>
+                      {EVENT_TYPE_LABELS[ev.eventType] ?? ev.eventType}
+                    </span>
+                    {isReal && (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${EVENT_STATUS_COLORS[ev.status] ?? "bg-slate-100 text-slate-500"}`}>
+                        {ev.status.charAt(0).toUpperCase() + ev.status.slice(1)}
+                      </span>
+                    )}
+                    {ev.kind === "followup" && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-slate-100 text-slate-400">From follow-up date</span>
+                    )}
+                  </div>
+                </div>
+                <button onClick={() => { setSelectedEvent(null); setConfirmDeleteEvent(false); }} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors duration-150 shrink-0">
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="px-6 py-4 space-y-3 text-sm">
+                <div className="flex gap-3">
+                  <span className="text-slate-400 w-20 shrink-0">When</span>
+                  <span className="text-slate-700">{whenLabel}</span>
+                </div>
+                {ev.leadName && ev.leadName !== "—" && (
+                  <div className="flex gap-3">
+                    <span className="text-slate-400 w-20 shrink-0">Lead</span>
+                    <span className="text-slate-700">{ev.leadName}</span>
+                  </div>
+                )}
+                {ev.description && (
+                  <div className="flex gap-3">
+                    <span className="text-slate-400 w-20 shrink-0">Notes</span>
+                    <span className="text-slate-700 whitespace-pre-wrap" style={{ overflowWrap: "anywhere" }}>{ev.description}</span>
+                  </div>
+                )}
+                {ev.kind === "followup" && (
+                  <p className="text-xs text-slate-400 italic">This item comes from the lead&apos;s follow-up date. Open the lead to edit or clear it.</p>
+                )}
+              </div>
+              <div className="flex items-center gap-2 flex-wrap px-6 py-4 border-t border-slate-100">
+                {eventOpenedFrom === "lead" ? (
+                  <button
+                    onClick={() => {
+                      const d = new Date(ev.startAt);
+                      setCalMonth(new Date(d.getFullYear(), d.getMonth(), 1));
+                      setCalendarView("calendar");
+                      setTopTab("calendar");
+                      setSelectedEvent(null);
+                      setConfirmDeleteEvent(false);
+                    }}
+                    className="text-xs font-medium text-slate-600 hover:text-blue-600 border border-slate-200 hover:border-blue-400 px-3 py-1.5 rounded-lg transition-colors duration-150"
+                  >
+                    Open calendar
+                  </button>
+                ) : (
+                  ev.leadId && (
+                    <button
+                      onClick={() => { setSelectedId(ev.leadId); setActiveTab("overview"); setTopTab("leads"); setSelectedEvent(null); }}
+                      className="text-xs font-medium text-slate-600 hover:text-blue-600 border border-slate-200 hover:border-blue-400 px-3 py-1.5 rounded-lg transition-colors duration-150"
+                    >
+                      Open lead
+                    </button>
+                  )
+                )}
+                <button onClick={() => downloadEventIcs(ev)} className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-blue-600 border border-slate-200 hover:border-blue-400 px-3 py-1.5 rounded-lg transition-colors duration-150">
+                  <Calendar size={12} /> Add to calendar
+                </button>
+                {isReal && ev.status !== "completed" && (
+                  <button onClick={() => handleEventStatus(ev.eventId!, "completed")} className="inline-flex items-center gap-1.5 text-xs font-semibold text-green-700 bg-green-50 hover:bg-green-100 border border-green-200 px-3 py-1.5 rounded-lg transition-colors duration-150">
+                    <CheckCheck size={12} /> Mark complete
+                  </button>
+                )}
+                {isReal && ev.status === "scheduled" && (
+                  <button onClick={() => handleEventStatus(ev.eventId!, "cancelled")} className="text-xs font-medium text-slate-400 hover:text-slate-600 transition-colors duration-150">
+                    Cancel
+                  </button>
+                )}
+                {isReal && (
+                  confirmDeleteEvent ? (
+                    <span className="ml-auto inline-flex items-center gap-2">
+                      <span className="text-xs text-red-600">Delete?</span>
+                      <button onClick={() => handleDeleteEvent(ev.eventId!)} className="text-xs font-semibold bg-red-600 hover:bg-red-700 text-white px-2.5 py-1 rounded-lg transition-colors duration-150">Yes, delete</button>
+                      <button onClick={() => setConfirmDeleteEvent(false)} className="text-xs text-slate-400 hover:text-slate-600">No</button>
+                    </span>
+                  ) : (
+                    <button onClick={() => setConfirmDeleteEvent(true)} className="ml-auto text-xs font-medium text-red-500 hover:text-red-700 transition-colors duration-150">
+                      Delete event
+                    </button>
+                  )
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Add Scheduled Item Modal ── */}
+      {showAddEvent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowAddEvent(false)} />
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <h2 className="font-semibold text-[#0f1c40]">Add scheduled item</h2>
+              <button onClick={() => setShowAddEvent(false)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors duration-150">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="px-6 py-5 space-y-3">
+              <div className="relative">
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">Lead</label>
+                {(() => {
+                  const q = leadQuery.trim().toLowerCase();
+                  const matches = (q
+                    ? leads.filter((l) =>
+                        l.name.toLowerCase().includes(q) || (l.business_name ?? "").toLowerCase().includes(q))
+                    : [...leads]
+                  )
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .slice(0, 8);
+                  function pick(l: Lead) {
+                    setEventForm((f) => ({ ...f, lead_id: l.id }));
+                    setLeadQuery(l.name);
+                    setShowLeadDropdown(false);
+                  }
+                  return (
+                    <>
+                      <input
+                        ref={addEventLeadRef}
+                        type="text"
+                        value={leadQuery}
+                        onChange={(e) => {
+                          setLeadQuery(e.target.value);
+                          setShowLeadDropdown(true);
+                          if (!e.target.value.trim()) setEventForm((f) => ({ ...f, lead_id: "" }));
+                        }}
+                        onFocus={() => setShowLeadDropdown(true)}
+                        onBlur={() => setTimeout(() => setShowLeadDropdown(false), 120)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && showLeadDropdown && matches.length > 0) {
+                            e.preventDefault();
+                            pick(matches[0]);
+                          }
+                        }}
+                        placeholder="Search a lead by name… (optional)"
+                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                      />
+                      {showLeadDropdown && matches.length > 0 && (
+                        <div className="absolute z-10 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-52 overflow-y-auto">
+                          {matches.map((l) => (
+                            <button
+                              key={l.id}
+                              type="button"
+                              onMouseDown={(e) => { e.preventDefault(); pick(l); }}
+                              className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-50 transition-colors duration-100 ${
+                                l.id === eventForm.lead_id ? "bg-blue-50" : ""
+                              }`}
+                            >
+                              <span className="text-slate-700">{l.name}</span>
+                              {l.business_name && <span className="text-slate-400"> · {l.business_name}</span>}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">Title <span className="text-red-400">*</span></label>
+                <input
+                  type="text"
+                  value={eventForm.title}
+                  onChange={(e) => setEventForm((f) => ({ ...f, title: e.target.value }))}
+                  placeholder="e.g. Estimate for driveway pressure washing"
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">Type</label>
+                  <select
+                    value={eventForm.event_type}
+                    onChange={(e) => setEventForm((f) => ({ ...f, event_type: e.target.value }))}
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                  >
+                    {Object.entries(EVENT_TYPE_LABELS).map(([v, label]) => (
+                      <option key={v} value={v}>{label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">Status</label>
+                  <select
+                    value={eventForm.status}
+                    onChange={(e) => setEventForm((f) => ({ ...f, status: e.target.value }))}
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                  >
+                    <option value="scheduled">Scheduled</option>
+                    <option value="completed">Completed</option>
+                    <option value="cancelled">Cancelled</option>
+                    <option value="missed">Missed</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">Start date <span className="text-red-400">*</span></label>
+                  <input ref={addEventStartRef} type="date" value={eventForm.start_date} onChange={(e) => setEventForm((f) => ({ ...f, start_date: e.target.value }))} className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">Start time</label>
+                  <TimeField
+                    time={eventForm.start_time}
+                    ampm={eventForm.start_ampm}
+                    onTimeChange={(v) => { setEventForm((f) => ({ ...f, start_time: v })); setEventError(null); }}
+                    onAmpmChange={(v) => setEventForm((f) => ({ ...f, start_ampm: v }))}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">End date</label>
+                  <input type="date" value={eventForm.end_date} onChange={(e) => setEventForm((f) => ({ ...f, end_date: e.target.value }))} className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">End time</label>
+                  <TimeField
+                    time={eventForm.end_time}
+                    ampm={eventForm.end_ampm}
+                    onTimeChange={(v) => { setEventForm((f) => ({ ...f, end_time: v })); setEventError(null); }}
+                    onAmpmChange={(v) => setEventForm((f) => ({ ...f, end_ampm: v }))}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">Description</label>
+                <textarea rows={2} value={eventForm.description} onChange={(e) => setEventForm((f) => ({ ...f, description: e.target.value }))} className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400 resize-none leading-relaxed" />
+              </div>
+              {eventError && (
+                <p className="text-xs text-red-600 font-medium">{eventError}</p>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100">
+              <button onClick={() => setShowAddEvent(false)} className="text-sm text-slate-500 hover:text-slate-700 transition-colors duration-150">Cancel</button>
+              <button
+                onClick={() => handleSaveEvent(false)}
+                disabled={eventSaving || !eventForm.title.trim() || !eventForm.start_date}
+                className="text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {eventSaving ? "Saving…" : "Save item"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Add Lead Modal ── */}
       {showAddLead && (
@@ -2429,10 +3656,11 @@ export default function AdminDashboard({
                   </label>
                   <select
                     value={addLeadForm.urgency}
-                    onChange={(e) => setAddLeadForm((f) => ({ ...f, urgency: e.target.value as "emergency" | "normal" }))}
+                    onChange={(e) => setAddLeadForm((f) => ({ ...f, urgency: e.target.value as "emergency" | "priority" | "normal" }))}
                     className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
                   >
                     <option value="normal">Normal</option>
+                    <option value="priority">Priority</option>
                     <option value="emergency">Emergency</option>
                   </select>
                 </div>
