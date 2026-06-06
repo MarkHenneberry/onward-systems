@@ -7,8 +7,12 @@ export default function Hero() {
       {/* Animated grid background */}
       <Boxes />
 
-      {/* Radial gradient mask — fades boxes toward centre so text stays readable */}
-      <div className="absolute inset-0 z-[1] [mask-image:radial-gradient(ellipse_60%_70%_at_50%_50%,transparent_30%,black_100%)] bg-[#0f1c40] pointer-events-none" />
+      {/* Readability veils — translucent (not solid) so the animated grid reads as
+          one continuous background behind the entire hero. A uniform navy veil keeps
+          the grid subtle everywhere; a soft left-anchored radial darkens behind the
+          headline/subtext for contrast while leaving the grid visible elsewhere. */}
+      <div className="absolute inset-0 z-[1] pointer-events-none bg-[#0f1c40]/45" />
+      <div className="absolute inset-0 z-[1] pointer-events-none bg-[radial-gradient(ellipse_60%_70%_at_30%_50%,rgba(15,28,64,0.65),transparent_75%)]" />
 
       {/* Soft blue glow top-right */}
       <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-blue-600/15 rounded-full blur-3xl pointer-events-none z-[2]" />
@@ -16,7 +20,10 @@ export default function Hero() {
       {/* Faint center glow behind content */}
       <div className="absolute top-1/2 left-1/4 -translate-y-1/2 w-[500px] h-[400px] bg-blue-400/5 rounded-full blur-3xl pointer-events-none z-[2]" />
 
-      <div className="relative z-10 max-w-6xl mx-auto px-6 md:px-10 pt-24 pb-16 lg:pt-28 lg:pb-20 w-full" style={{ zIndex: 10 }}>
+      {/* pointer-events-none lets mouse-move pass through empty content areas to the
+          grid layer beneath, so the hover effect works across the whole hero.
+          Interactive elements below re-enable pointer-events-auto. */}
+      <div className="relative z-10 max-w-6xl mx-auto px-6 md:px-10 pt-24 pb-16 lg:pt-28 lg:pb-20 w-full pointer-events-none" style={{ zIndex: 10 }}>
         <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
           {/* Left: Copy */}
           <div>
@@ -41,11 +48,11 @@ export default function Hero() {
             </p>
 
             <div className="flex flex-wrap gap-3 mb-10">
-              <a href="#contact" className="btn-primary text-base px-7 py-3.5">
+              <a href="#contact" className="btn-primary text-base px-7 py-3.5 pointer-events-auto">
                 Get a free systems review
                 <ArrowRight size={18} />
               </a>
-              <a href="#how-it-works" className="btn-ghost-white text-base px-7 py-3.5">
+              <a href="#how-it-works" className="btn-ghost-white text-base px-7 py-3.5 pointer-events-auto">
                 See how it works
               </a>
             </div>
@@ -96,7 +103,7 @@ export default function Hero() {
 
 function HeroDashboard() {
   return (
-    <div className="w-full max-w-sm mx-auto lg:mx-0">
+    <div className="w-full max-w-sm mx-auto lg:mx-0 pointer-events-auto">
       {/* Outer card */}
       <div className="bg-white/8 backdrop-blur-md border border-white/15 rounded-2xl p-4 shadow-2xl ring-1 ring-white/5">
         {/* Header bar */}
