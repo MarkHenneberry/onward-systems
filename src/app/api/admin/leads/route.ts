@@ -3,9 +3,9 @@ import { cookies } from "next/headers";
 import { generateAdminToken, isAdminPasswordSet, ADMIN_COOKIE } from "@/lib/admin-auth";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 
-const VALID_STATUSES = ["new", "contacted", "quoted", "booked", "completed", "lost"];
-const VALID_URGENCIES = ["emergency", "normal"];
-const VALID_SOURCES = ["website", "facebook", "phone", "text", "email", "referral", "manual", "other"];
+const VALID_STATUSES = ["prospect", "new", "contacted", "interested", "quoted", "booked", "completed", "lost", "not_a_fit"];
+const VALID_URGENCIES = ["emergency", "priority", "normal"];
+const VALID_SOURCES = ["website", "facebook", "google", "phone", "text", "email", "referral", "manual", "other"];
 
 async function checkAuth(): Promise<boolean> {
   if (!isAdminPasswordSet()) return false;

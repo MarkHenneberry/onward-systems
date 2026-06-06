@@ -42,7 +42,7 @@ export type Lead = {
   help_needed: string | null;
   message: string | null;
   urgency: "emergency" | "priority" | "normal";
-  status: "new" | "contacted" | "quoted" | "booked" | "completed" | "lost";
+  status: "prospect" | "new" | "contacted" | "interested" | "quoted" | "booked" | "completed" | "lost" | "not_a_fit";
   source: string | null;
   notes: string | null;
   follow_up_date: string | null;
@@ -52,6 +52,9 @@ export type Lead = {
   needs_response: boolean;
   unread_count: number;
   facebook_sender_id: string | null;
+  fit_score: number | null;
+  outreach_status: string | null;
+  prospect_checklist: Record<string, boolean> | null;
 };
 
 type LeadNote = {
@@ -115,32 +118,102 @@ type CalItem = {
 type DetailTab = "overview" | "messages" | "notes" | "timeline";
 
 const STATUS_OPTIONS = [
+  "prospect",
   "new",
   "contacted",
+  "interested",
   "quoted",
   "booked",
   "completed",
   "lost",
+  "not_a_fit",
 ] as const;
 type Status = (typeof STATUS_OPTIONS)[number];
 
 const STATUS_LABELS: Record<Status, string> = {
+  prospect: "Prospect",
   new: "New",
   contacted: "Contacted",
+  interested: "Interested",
   quoted: "Quoted",
   booked: "Booked",
   completed: "Completed",
   lost: "Lost",
+  not_a_fit: "Not a fit",
 };
 
 const STATUS_COLORS: Record<Status, string> = {
+  prospect: "bg-violet-100 text-violet-700",
   new: "bg-blue-100 text-blue-700",
   contacted: "bg-amber-100 text-amber-700",
+  interested: "bg-teal-100 text-teal-700",
   quoted: "bg-purple-100 text-purple-700",
   booked: "bg-green-100 text-green-700",
   completed: "bg-slate-100 text-slate-600",
   lost: "bg-red-100 text-red-600",
+  not_a_fit: "bg-gray-100 text-gray-500",
 };
+
+// ─── Prospecting ───────────────────────────────────────────────────────────────
+
+const OUTREACH_STATUS_OPTIONS = [
+  "not_contacted",
+  "outreach_sent",
+  "follow_up_needed",
+  "replied",
+  "interested",
+  "not_interested",
+  "bad_fit",
+] as const;
+type OutreachStatus = (typeof OUTREACH_STATUS_OPTIONS)[number];
+
+const OUTREACH_STATUS_LABELS: Record<OutreachStatus, string> = {
+  not_contacted: "Not contacted",
+  outreach_sent: "Outreach sent",
+  follow_up_needed: "Follow-up needed",
+  replied: "Replied",
+  interested: "Interested",
+  not_interested: "Not interested",
+  bad_fit: "Bad fit",
+};
+
+// Qualification checklist — key → label. Stored as { key: true } in prospect_checklist.
+const PROSPECT_CHECKLIST: { key: string; label: string }[] = [
+  { key: "no_website", label: "No website" },
+  { key: "bad_website", label: "Bad/old website" },
+  { key: "facebook_only", label: "Facebook-only business" },
+  { key: "no_lead_form", label: "No clear lead form" },
+  { key: "slow_inquiry", label: "Slow/manual inquiry process" },
+  { key: "no_booking", label: "No online booking/request flow" },
+  { key: "poor_google", label: "Poor Google presence" },
+  { key: "good_fit", label: "Good local fit" },
+  { key: "visible_demand", label: "Has visible demand/jobs" },
+  { key: "looks_active", label: "Looks active" },
+];
+
+const PROSPECTING_STATUSES = new Set<string>(["prospect", "contacted"]);
+
+// Quick "likely need" chips for the prospecting panel.
+const HELP_CHIPS = ["Website", "Lead system", "Follow-up system", "Messaging hub", "Not sure yet", "Other"];
+
+// Keeps the first occurrence of each lead id — guards against optimistic insert +
+// realtime/polling racing and producing duplicate React keys.
+function dedupeLeadsById(leads: Lead[]): Lead[] {
+  const seen = new Set<string>();
+  const out: Lead[] = [];
+  for (const l of leads) {
+    if (!seen.has(l.id)) { seen.add(l.id); out.push(l); }
+  }
+  return out;
+}
+
+function hasProspectData(l: Lead): boolean {
+  return (
+    !!l.fit_score ||
+    (!!l.outreach_status && l.outreach_status !== "not_contacted") ||
+    (!!l.prospect_checklist && Object.keys(l.prospect_checklist).length > 0)
+  );
+}
 
 const SOURCE_OPTIONS = [
   "website", "facebook", "phone", "text", "email", "referral", "manual", "other",
@@ -193,6 +266,11 @@ const ACTIVITY_STYLES: Record<string, ActivityStyle> = {
   urgency_changed: { Icon: AlertTriangle, bg: "bg-red-50", color: "text-red-500" },
   schedule_event_created: { Icon: Clock, bg: "bg-blue-50", color: "text-blue-500" },
   schedule_event_completed: { Icon: CheckCheck, bg: "bg-green-50", color: "text-green-500" },
+  outreach_logged: { Icon: Send, bg: "bg-violet-50", color: "text-violet-500" },
+  outreach_status_changed: { Icon: ArrowRight, bg: "bg-violet-50", color: "text-violet-500" },
+  fit_score_changed: { Icon: AlertTriangle, bg: "bg-violet-50", color: "text-violet-500" },
+  prospect_converted: { Icon: ArrowRight, bg: "bg-green-50", color: "text-green-500" },
+  prospect_disqualified: { Icon: X, bg: "bg-slate-100", color: "text-slate-400" },
 };
 
 const DEFAULT_ACTIVITY_STYLE: ActivityStyle = {
@@ -681,6 +759,16 @@ export default function AdminDashboard({
   const [showAddEvent, setShowAddEvent] = useState(false);
   const [showScheduleForm, setShowScheduleForm] = useState(false);
   const [eventSaving, setEventSaving] = useState(false);
+
+  // Prospecting outreach state
+  const [showOutreach, setShowOutreach] = useState(false);
+  const [outreachDraft, setOutreachDraft] = useState({ channel: "facebook", body: "", outreachStatus: "outreach_sent", scheduleFollowUp: false });
+  const [outreachSaving, setOutreachSaving] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState(false);
+  const [prospectCollapsed, setProspectCollapsed] = useState(false);
+  // Inline "Help needed" editing inside the prospecting panel
+  const [helpDraft, setHelpDraft] = useState("");
+  const [editingHelp, setEditingHelp] = useState(false);
   const emptyEventForm = {
     lead_id: "",
     title: "",
@@ -798,6 +886,14 @@ export default function AdminDashboard({
     setSavingNoteForMsgId(null);
     setAddedNoteForMsgId(null);
     setShowScheduleForm(false);
+    setShowOutreach(false);
+    setOutreachDraft({ channel: "facebook", body: "", outreachStatus: "outreach_sent", scheduleFollowUp: false });
+    setCopyFeedback(false);
+    setEditingHelp(false);
+    // Collapse the prospecting panel by default once there is data to summarize
+    const lead = initialLeads.find((l) => l.id === selectedId) ?? leads.find((l) => l.id === selectedId);
+    setProspectCollapsed(lead ? hasProspectData(lead) : false);
+    setHelpDraft(lead?.help_needed ?? "");
 
     if (!selectedId) return;
 
@@ -1001,7 +1097,7 @@ export default function AdminDashboard({
         const res = await fetch("/api/admin/leads");
         if (!res.ok) return;
         const { data } = await res.json();
-        if (data) setLeads(data);
+        if (data) setLeads(dedupeLeadsById(data));
       } catch {
         // silent — background poll, never surface errors to the user
       }
@@ -1225,7 +1321,7 @@ export default function AdminDashboard({
       ]);
       if (msgsJson.data) { justLoadedRef.current = true; setMessages(msgsJson.data); }
       if (activJson.data) setActivities(activJson.data);
-      if (leadsJson.data) setLeads(leadsJson.data);
+      if (leadsJson.data) setLeads(dedupeLeadsById(leadsJson.data));
     } catch (err) {
       console.error("[admin] refresh messages error:", err);
     } finally {
@@ -1249,7 +1345,7 @@ export default function AdminDashboard({
 
   // Filtered + sorted leads
   const filteredLeads = useMemo(() => {
-    let out = [...leads];
+    let out = dedupeLeadsById(leads); // final guard against duplicate React keys
     if (statusFilter !== "all") out = out.filter((l) => l.status === statusFilter);
     if (urgencyFilter !== "all") out = out.filter((l) => l.urgency === urgencyFilter);
     if (needsResponseFilter) out = out.filter((l) => l.needs_response);
@@ -1334,6 +1430,131 @@ export default function AdminDashboard({
       { _prev_urgency: prevUrgency }
     );
     if (ok) refreshActivities(id);
+  }
+
+  // ── Prospecting ───────────────────────────────────────────────────────────────
+
+  async function handleFitScore(id: string, score: number) {
+    const prev = selectedLead?.fit_score ?? null;
+    const next = prev === score ? null : score; // click same number to clear
+    const ok = await patchLead(id, { fit_score: next }, { _prev_fit_score: prev });
+    if (ok) refreshActivities(id);
+  }
+
+  async function handleOutreachStatus(id: string, status: string) {
+    const prev = selectedLead?.outreach_status ?? null;
+    if (prev === status) return;
+    const ok = await patchLead(id, { outreach_status: status }, { _prev_outreach_status: prev });
+    if (ok) refreshActivities(id);
+  }
+
+  function handleChecklistToggle(id: string, key: string) {
+    const current = selectedLead?.prospect_checklist ?? {};
+    const next = { ...current, [key]: !current[key] };
+    if (!next[key]) delete next[key]; // keep the object tidy
+    patchLead(id, { prospect_checklist: next });
+  }
+
+  function openScheduleFollowUp() {
+    if (!selectedLead) return;
+    setEventForm({
+      ...emptyEventForm,
+      lead_id: selectedLead.id,
+      title: `Follow up with ${selectedLead.business_name || selectedLead.name}`,
+      event_type: "follow_up",
+      description: "Prospect follow-up",
+      start_date: selectedLead.follow_up_date ? toDateInputValue(selectedLead.follow_up_date) : "",
+    });
+    setEventError(null);
+    setShowScheduleForm(true);
+  }
+
+  async function handleLogOutreach() {
+    if (!selectedId || !outreachDraft.body.trim()) return;
+    setOutreachSaving(true);
+    try {
+      // 1) Save the outreach as an outbound message
+      const res = await fetch(`/api/admin/leads/${selectedId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel: outreachDraft.channel, direction: "outbound", body: outreachDraft.body.trim() }),
+      });
+      if (res.ok) {
+        const { data } = await res.json();
+        setMessages((prev) => [...prev, data]);
+        recordLatestMessage(data);
+      }
+      // 2) Update outreach_status (separate from pipeline status)
+      await patchLead(selectedId, { outreach_status: outreachDraft.outreachStatus });
+      // 3) Log an outreach activity
+      await fetch(`/api/admin/leads/${selectedId}/activities`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "outreach_logged", label: `Outreach logged — ${OUTREACH_STATUS_LABELS[outreachDraft.outreachStatus as OutreachStatus] ?? "Outreach sent"}`, metadata: { channel: outreachDraft.channel, outreach_status: outreachDraft.outreachStatus } }),
+      });
+      // Logging outreach never changes the pipeline status — only outreach_status.
+      refreshActivities(selectedId);
+      const wantsFollowUp = outreachDraft.scheduleFollowUp;
+      setOutreachDraft({ channel: "facebook", body: "", outreachStatus: "outreach_sent", scheduleFollowUp: false });
+      setShowOutreach(false);
+      // 4) Optionally open the schedule follow-up flow
+      if (wantsFollowUp) openScheduleFollowUp();
+    } catch (err) {
+      console.error("[admin] log outreach error:", err);
+    } finally {
+      setOutreachSaving(false);
+    }
+  }
+
+  async function handleHelpNeeded(value: string) {
+    if (!selectedId) return;
+    const v = value.trim();
+    setHelpDraft(v);
+    setEditingHelp(false);
+    const ok = await patchLead(selectedId, { help_needed: v || null }, { _prev_help_needed: selectedLead?.help_needed ?? null });
+    if (ok) refreshActivities(selectedId);
+  }
+
+  function handleCopyOutreach() {
+    if (!selectedLead) return;
+    const who = selectedLead.business_name || selectedLead.name || "there";
+    const template = `Hi ${who}, I came across your business and wanted to reach out — I help local businesses tidy up their website, online booking, and Google presence so more inquiries turn into jobs. Would you be open to a quick chat?`;
+    navigator.clipboard?.writeText(template).then(
+      () => { setCopyFeedback(true); setTimeout(() => setCopyFeedback(false), 2000); },
+      () => {}
+    );
+  }
+
+  // Promotes a prospect into the normal pipeline (status New). Prospecting data
+  // is preserved; the panel hides because the status is no longer prospect/contacted.
+  async function handleConvertToLead() {
+    if (!selectedId) return;
+    const ok = await patchLead(selectedId, { status: "new" }, { _prev_status: selectedLead?.status });
+    if (ok) {
+      await fetch(`/api/admin/leads/${selectedId}/activities`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "prospect_converted", label: "Prospect converted to lead" }),
+      });
+      refreshActivities(selectedId);
+    }
+  }
+
+  async function handleMarkNotAFit() {
+    if (!selectedId) return;
+    const ok = await patchLead(
+      selectedId,
+      { status: "not_a_fit", outreach_status: "bad_fit" },
+      { _prev_status: selectedLead?.status }
+    );
+    if (ok) {
+      await fetch(`/api/admin/leads/${selectedId}/activities`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "prospect_disqualified", label: "Prospect marked not a fit" }),
+      });
+      refreshActivities(selectedId);
+    }
   }
 
   async function handleFollowUpChange(id: string, dateValue: string) {
@@ -1483,7 +1704,7 @@ export default function AdminDashboard({
       });
       if (res.ok) {
         const { data } = await res.json();
-        setLeads((prev) => [data, ...prev]);
+        setLeads((prev) => dedupeLeadsById([data, ...prev]));
         setShowAddLead(false);
         setAddLeadForm({
           name: "",
@@ -1668,6 +1889,215 @@ export default function AdminDashboard({
             </select>
           </div>
         </div>
+
+        {/* Prospecting panel — only while the lead is a Prospect or Contacted */}
+        {PROSPECTING_STATUSES.has(selectedLead.status) && (
+          <div className="bg-violet-50 border border-violet-100 rounded-xl p-4 space-y-3">
+            {/* Header: title + summary (collapsed) + toggle */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setProspectCollapsed((v) => !v)}
+                className="flex items-center gap-1.5 text-xs font-semibold text-violet-600 uppercase tracking-widest"
+              >
+                <span className={`text-[10px] transition-transform ${prospectCollapsed ? "" : "rotate-90"}`}>▶</span>
+                Prospecting
+              </button>
+              {prospectCollapsed && (
+                <span className="text-[11px] text-slate-500 truncate">
+                  Fit: {selectedLead.fit_score ?? "–"}/5 · {OUTREACH_STATUS_LABELS[(selectedLead.outreach_status ?? "not_contacted") as OutreachStatus]} · Checklist: {Object.keys(selectedLead.prospect_checklist ?? {}).length}/{PROSPECT_CHECKLIST.length}
+                </span>
+              )}
+            </div>
+
+            {/* Quick actions — always visible */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => setShowOutreach((v) => !v)}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-white bg-violet-600 hover:bg-violet-700 px-3 py-1.5 rounded-lg transition-colors duration-150"
+              >
+                <Send size={11} /> Log outreach
+              </button>
+              <button
+                onClick={openScheduleFollowUp}
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-violet-600 bg-white border border-slate-200 hover:border-violet-400 px-3 py-1.5 rounded-lg transition-colors duration-150"
+              >
+                <Clock size={11} /> Schedule follow-up
+              </button>
+              <button
+                onClick={handleCopyOutreach}
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-violet-600 bg-white border border-slate-200 hover:border-violet-400 px-3 py-1.5 rounded-lg transition-colors duration-150"
+              >
+                {copyFeedback ? "✓ Copied" : "Copy outreach message"}
+              </button>
+            </div>
+
+            {/* Log outreach inline form — available even when collapsed */}
+            {showOutreach && (
+              <div className="space-y-2 bg-white border border-violet-100 rounded-lg p-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <select
+                    value={outreachDraft.channel}
+                    onChange={(e) => setOutreachDraft((d) => ({ ...d, channel: e.target.value }))}
+                    className="text-sm border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-violet-400"
+                  >
+                    {["facebook", "email", "phone", "manual", "other"].map((c) => (
+                      <option key={c} value={c}>{SOURCE_LABELS[c as Source] ?? c}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={outreachDraft.outreachStatus}
+                    onChange={(e) => setOutreachDraft((d) => ({ ...d, outreachStatus: e.target.value }))}
+                    className="text-sm border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-violet-400"
+                    title="Outreach status after this"
+                  >
+                    {OUTREACH_STATUS_OPTIONS.map((s) => (
+                      <option key={s} value={s}>{OUTREACH_STATUS_LABELS[s]}</option>
+                    ))}
+                  </select>
+                  <label className="flex items-center gap-1.5 text-xs text-slate-500">
+                    <input type="checkbox" checked={outreachDraft.scheduleFollowUp} onChange={(e) => setOutreachDraft((d) => ({ ...d, scheduleFollowUp: e.target.checked }))} />
+                    + Follow-up
+                  </label>
+                </div>
+                <textarea
+                  value={outreachDraft.body}
+                  onChange={(e) => setOutreachDraft((d) => ({ ...d, body: e.target.value }))}
+                  rows={3}
+                  placeholder="What did you send? e.g. Messaged on Facebook about a website refresh."
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-violet-400 resize-none leading-relaxed"
+                />
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => setShowOutreach(false)} className="text-xs font-medium text-slate-500 hover:text-slate-700 transition-colors duration-150">Cancel</button>
+                  <button
+                    onClick={handleLogOutreach}
+                    disabled={outreachSaving || !outreachDraft.body.trim()}
+                    className="text-xs font-semibold bg-violet-600 hover:bg-violet-700 text-white px-3 py-1.5 rounded-lg transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {outreachSaving ? "Saving…" : "Save outreach"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Expanded controls */}
+            {!prospectCollapsed && (
+              <div className="space-y-4 pt-1">
+                {/* Likely need / Help needed */}
+                <div>
+                  <div className="text-xs text-slate-500 mb-1.5">Likely need / Help needed</div>
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {HELP_CHIPS.map((chip) => {
+                      const active = (selectedLead.help_needed ?? "").toLowerCase() === chip.toLowerCase();
+                      return (
+                        <button
+                          key={chip}
+                          onClick={() => handleHelpNeeded(chip)}
+                          className={`text-xs px-2.5 py-1 rounded-lg border transition-colors duration-150 ${
+                            active ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-400"
+                          }`}
+                        >
+                          {chip}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={helpDraft}
+                      onChange={(e) => { setHelpDraft(e.target.value); setEditingHelp(true); }}
+                      placeholder="Custom need…"
+                      className="flex-1 min-w-0 text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-violet-400"
+                    />
+                    {editingHelp && helpDraft.trim() !== (selectedLead.help_needed ?? "").trim() && (
+                      <button
+                        onClick={() => handleHelpNeeded(helpDraft)}
+                        className="shrink-0 text-xs font-semibold bg-violet-600 hover:bg-violet-700 text-white px-3 py-1.5 rounded-lg transition-colors duration-150"
+                      >
+                        Save
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Fit score */}
+                <div>
+                  <div className="text-xs text-slate-500 mb-1.5">Fit score</div>
+                  <div className="flex items-center gap-1.5">
+                    {[1, 2, 3, 4, 5].map((n) => {
+                      const active = (selectedLead.fit_score ?? 0) >= n;
+                      return (
+                        <button
+                          key={n}
+                          onClick={() => handleFitScore(selectedLead.id, n)}
+                          className={`w-7 h-7 rounded-lg text-sm font-semibold border transition-colors duration-150 ${
+                            active ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-400 border-slate-200 hover:border-violet-300"
+                          }`}
+                        >
+                          {n}
+                        </button>
+                      );
+                    })}
+                    {selectedLead.fit_score && (
+                      <span className="text-xs text-slate-400 ml-1">tap again to clear</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Outreach status */}
+                <div>
+                  <div className="text-xs text-slate-500 mb-1.5">Outreach status</div>
+                  <select
+                    value={selectedLead.outreach_status ?? "not_contacted"}
+                    onChange={(e) => handleOutreachStatus(selectedLead.id, e.target.value)}
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-violet-400"
+                  >
+                    {OUTREACH_STATUS_OPTIONS.map((s) => (
+                      <option key={s} value={s}>{OUTREACH_STATUS_LABELS[s]}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Qualification checklist */}
+                <div>
+                  <div className="text-xs text-slate-500 mb-1.5">Qualification</div>
+                  <div className="grid grid-cols-1 gap-1">
+                    {PROSPECT_CHECKLIST.map(({ key, label }) => {
+                      const checked = !!selectedLead.prospect_checklist?.[key];
+                      return (
+                        <label key={key} className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer select-none py-0.5">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => handleChecklistToggle(selectedLead.id, key)}
+                            className="rounded border-slate-300 text-violet-600 focus:ring-violet-400"
+                          />
+                          {label}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Convert / disqualify */}
+                <div className="flex items-center gap-3 pt-1 border-t border-violet-100">
+                  <button
+                    onClick={handleConvertToLead}
+                    className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-green-700 bg-green-50 hover:bg-green-100 border border-green-200 px-3 py-1.5 rounded-lg transition-colors duration-150"
+                  >
+                    <ArrowRight size={11} /> Convert to lead
+                  </button>
+                  <button
+                    onClick={handleMarkNotAFit}
+                    className="mt-2 text-xs font-medium text-slate-400 hover:text-red-500 transition-colors duration-150"
+                  >
+                    Mark not a fit
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Follow-up date */}
         <div>
@@ -3122,6 +3552,16 @@ export default function AdminDashboard({
               <option value="asc">Oldest first</option>
             </select>
             <button
+              onClick={() => setStatusFilter((s) => (s === "prospect" ? "all" : "prospect"))}
+              className={`text-sm border rounded-lg px-3 py-1.5 transition-colors duration-150 ${
+                statusFilter === "prospect"
+                  ? "bg-violet-100 text-violet-700 border-violet-300 font-medium"
+                  : "border-slate-200 text-slate-600 bg-white hover:border-slate-300"
+              }`}
+            >
+              Prospects
+            </button>
+            <button
               onClick={() => setNeedsResponseFilter((v) => !v)}
               className={`text-sm border rounded-lg px-3 py-1.5 transition-colors duration-150 ${
                 needsResponseFilter
@@ -3724,7 +4164,16 @@ export default function AdminDashboard({
                   </label>
                   <select
                     value={addLeadForm.status}
-                    onChange={(e) => setAddLeadForm((f) => ({ ...f, status: e.target.value as Lead["status"] }))}
+                    onChange={(e) => {
+                      const status = e.target.value as Lead["status"];
+                      setAddLeadForm((f) => ({
+                        ...f,
+                        status,
+                        // Prospect defaults: help_needed = Prospecting, urgency = Normal
+                        help_needed: status === "prospect" && !f.help_needed.trim() ? "Prospecting" : f.help_needed,
+                        urgency: status === "prospect" ? "normal" : f.urgency,
+                      }));
+                    }}
                     className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
                   >
                     {STATUS_OPTIONS.map((s) => (

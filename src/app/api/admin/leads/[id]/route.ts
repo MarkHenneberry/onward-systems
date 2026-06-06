@@ -4,21 +4,42 @@ import { generateAdminToken, isAdminPasswordSet, ADMIN_COOKIE } from "@/lib/admi
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 
 const VALID_STATUSES = [
+  "prospect",
   "new",
   "contacted",
+  "interested",
   "quoted",
   "booked",
   "completed",
   "lost",
+  "not_a_fit",
 ];
 
 const STATUS_LABELS: Record<string, string> = {
+  prospect: "Prospect",
   new: "New",
   contacted: "Contacted",
+  interested: "Interested",
   quoted: "Quoted",
   booked: "Booked",
   completed: "Completed",
   lost: "Lost",
+  not_a_fit: "Not a fit",
+};
+
+const VALID_OUTREACH = [
+  "not_contacted", "outreach_sent", "follow_up_needed", "replied",
+  "interested", "not_interested", "bad_fit",
+];
+
+const OUTREACH_LABELS: Record<string, string> = {
+  not_contacted: "Not contacted",
+  outreach_sent: "Outreach sent",
+  follow_up_needed: "Follow-up needed",
+  replied: "Replied",
+  interested: "Interested",
+  not_interested: "Not interested",
+  bad_fit: "Bad fit",
 };
 
 const MONTHS = [
@@ -135,6 +156,34 @@ export async function PATCH(
     updates.urgency = body.urgency;
   }
 
+  // ── Prospecting fields ──────────────────────────────────────────────────────
+
+  if ("fit_score" in body) {
+    if (body.fit_score === null) {
+      updates.fit_score = null;
+    } else {
+      const n = Number(body.fit_score);
+      if (!Number.isInteger(n) || n < 1 || n > 5) {
+        return NextResponse.json({ error: "fit_score must be an integer 1–5." }, { status: 400 });
+      }
+      updates.fit_score = n;
+    }
+  }
+
+  if ("outreach_status" in body) {
+    if (!VALID_OUTREACH.includes(body.outreach_status as string)) {
+      return NextResponse.json({ error: "Invalid outreach_status." }, { status: 400 });
+    }
+    updates.outreach_status = body.outreach_status;
+  }
+
+  if ("prospect_checklist" in body) {
+    if (typeof body.prospect_checklist !== "object" || body.prospect_checklist === null || Array.isArray(body.prospect_checklist)) {
+      return NextResponse.json({ error: "prospect_checklist must be an object." }, { status: 400 });
+    }
+    updates.prospect_checklist = body.prospect_checklist;
+  }
+
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "No valid fields provided." }, { status: 400 });
   }
@@ -208,12 +257,63 @@ export async function PATCH(
     if (actErr) console.error("[admin] follow-up activity insert error:", actErr.message);
   }
 
-  // Detail fields update
+  // Outreach status change — client passes _prev_outreach_status; only log when changed.
+  // (Log-outreach saves omit _prev_outreach_status so they stay a single clean entry.)
+  if ("outreach_status" in body && "_prev_outreach_status" in body) {
+    const prev = body._prev_outreach_status as string | null;
+    if (prev && prev !== body.outreach_status) {
+      const { error: actErr } = await supabase.from("lead_activities").insert({
+        lead_id: id,
+        type: "outreach_status_changed",
+        label: `Outreach status changed from ${OUTREACH_LABELS[prev] ?? prev} to ${OUTREACH_LABELS[body.outreach_status] ?? body.outreach_status}`,
+        metadata: { from: prev, to: body.outreach_status },
+      });
+      if (actErr) console.error("[admin] outreach_status activity insert error:", actErr.message);
+    }
+  }
+
+  // Fit score change — client passes _prev_fit_score; only log when changed.
+  if ("fit_score" in body && "_prev_fit_score" in body) {
+    const prev = body._prev_fit_score ?? null;
+    const next = updates.fit_score ?? null;
+    if (prev !== next) {
+      const label = next === null
+        ? "Fit score cleared"
+        : `Fit score changed from ${prev ?? "–"} to ${next}`;
+      const { error: actErr } = await supabase.from("lead_activities").insert({
+        lead_id: id,
+        type: "fit_score_changed",
+        label,
+        metadata: { from: prev, to: next },
+      });
+      if (actErr) console.error("[admin] fit_score activity insert error:", actErr.message);
+    }
+  }
+
+  // Help needed quick edit — client passes _prev_help_needed; logs a dedicated entry
+  // and is excluded from the generic "Lead details updated" below to avoid double logging.
+  let helpHandled = false;
+  if ("help_needed" in body && "_prev_help_needed" in body) {
+    const prev = (body._prev_help_needed ?? null) as string | null;
+    const next = (updates.help_needed ?? null) as string | null;
+    if ((prev ?? "") !== (next ?? "")) {
+      const { error: actErr } = await supabase.from("lead_activities").insert({
+        lead_id: id,
+        type: "lead_updated",
+        label: "Help needed updated",
+        metadata: { field: "help_needed", from: prev, to: next },
+      });
+      if (actErr) console.error("[admin] help_needed activity insert error:", actErr.message);
+    }
+    helpHandled = true;
+  }
+
+  // Detail fields update (generic) — excludes help_needed when handled above
   const DETAIL_FIELDS = [
     "name", "business_name", "email", "phone",
     "website_or_facebook", "business_type", "help_needed", "message", "urgency",
   ];
-  const changedDetails = DETAIL_FIELDS.filter((f) => f in body);
+  const changedDetails = DETAIL_FIELDS.filter((f) => f in body && !(f === "help_needed" && helpHandled));
   if (changedDetails.length > 0) {
     const { error: actErr } = await supabase.from("lead_activities").insert({
       lead_id: id,
