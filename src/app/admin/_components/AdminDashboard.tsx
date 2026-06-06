@@ -752,6 +752,10 @@ export default function AdminDashboard({
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [calendarFilter, setCalendarFilter] = useState<"today" | "week" | "upcoming" | "overdue" | "all">("upcoming");
   const [calendarView, setCalendarView] = useState<"calendar" | "schedule">("calendar");
+  // The month grid is cramped on phones — default to the Schedule list there.
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 768) setCalendarView("schedule");
+  }, []);
   const [calMonth, setCalMonth] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
   const [selectedEvent, setSelectedEvent] = useState<CalItem | null>(null);
   const [eventOpenedFrom, setEventOpenedFrom] = useState<"calendar" | "lead">("calendar");
@@ -796,6 +800,8 @@ export default function AdminDashboard({
   const [urgencyFilter, setUrgencyFilter] = useState("all");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
   const [needsResponseFilter, setNeedsResponseFilter] = useState(false);
+  const [followUpDueFilter, setFollowUpDueFilter] = useState(false);
+  const [showFilters, setShowFilters] = useState(false); // mobile collapsible dropdowns
   const [messagesRefreshing, setMessagesRefreshing] = useState(false);
   const [showLogForm, setShowLogForm] = useState(false);
   const [replyChannel, setReplyChannel] = useState("email");
@@ -1349,13 +1355,32 @@ export default function AdminDashboard({
     if (statusFilter !== "all") out = out.filter((l) => l.status === statusFilter);
     if (urgencyFilter !== "all") out = out.filter((l) => l.urgency === urgencyFilter);
     if (needsResponseFilter) out = out.filter((l) => l.needs_response);
+    if (followUpDueFilter) out = out.filter((l) => l.follow_up_date && isFollowUpOverdue(l.follow_up_date));
     out.sort((a, b) => {
       const diff =
         new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
       return sortDir === "desc" ? -diff : diff;
     });
     return out;
-  }, [leads, statusFilter, urgencyFilter, sortDir, needsResponseFilter]);
+  }, [leads, statusFilter, urgencyFilter, sortDir, needsResponseFilter, followUpDueFilter]);
+
+  // Active stat-filter derived from the underlying filter states (kept in sync with
+  // the status dropdown / Needs response button so there are no stale highlights).
+  // "none" when a different manual filter (e.g. a non-New status) is applied.
+  const activeStat: "all" | "new" | "needs" | "due" | "none" =
+    needsResponseFilter ? "needs"
+    : followUpDueFilter ? "due"
+    : statusFilter === "new" ? "new"
+    : statusFilter === "all" ? "all"
+    : "none";
+
+  // Stat cards/chips apply one quick filter at a time. Clicking the active one clears it.
+  function applyStatFilter(kind: "all" | "new" | "needs" | "due") {
+    const isActive = activeStat === kind && kind !== "all";
+    setNeedsResponseFilter(kind === "needs" && !isActive);
+    setFollowUpDueFilter(kind === "due" && !isActive);
+    setStatusFilter(kind === "new" && !isActive ? "new" : "all");
+  }
 
   // Primary conversation channel for a lead (drives the channel badge + reply default)
   function leadChannel(lead: Lead): "facebook" | "email" | string {
@@ -2542,18 +2567,20 @@ export default function AdminDashboard({
     return (
       <div className="flex-1 min-h-0 flex flex-col">
 
-        {/* ── A: Action bar ── */}
-        <div className="shrink-0 flex items-center gap-2 flex-wrap px-5 py-2 border-b border-slate-100 bg-white">
+        {/* ── A: Action bar — status on its own line on mobile, buttons wrap below ── */}
+        <div className="shrink-0 flex items-center gap-2 flex-wrap px-4 md:px-5 py-2 border-b border-slate-100 bg-white">
           {hasAlert && (
             <>
-              <Bell size={12} className="text-teal-600 shrink-0" />
-              <span className="text-xs text-teal-700 flex-1 min-w-0">
-                {selectedLead?.has_unread_messages ? "Unread message" : "Needs response"}
-              </span>
+              <div className="flex items-center gap-1.5 w-full md:w-auto md:flex-1 min-w-0">
+                <Bell size={12} className="text-teal-600 shrink-0" />
+                <span className="text-xs text-teal-700 truncate">
+                  {selectedLead?.has_unread_messages ? "Unread message" : "Needs response"}
+                </span>
+              </div>
               {selectedLead?.has_unread_messages && (
                 <button
                   onClick={handleMarkAsRead}
-                  className="inline-flex items-center gap-1 text-xs font-semibold text-teal-700 hover:text-teal-900 bg-teal-50 hover:bg-teal-100 border border-teal-200 px-2 py-1 rounded-lg transition-colors duration-150"
+                  className="shrink-0 inline-flex items-center gap-1 text-xs font-semibold text-teal-700 hover:text-teal-900 bg-teal-50 hover:bg-teal-100 border border-teal-200 px-2 py-1 rounded-lg transition-colors duration-150"
                 >
                   <CheckCheck size={10} />
                   Mark as read
@@ -2562,7 +2589,7 @@ export default function AdminDashboard({
               {selectedLead?.needs_response && (
                 <button
                   onClick={handleMarkAsHandled}
-                  className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600 hover:text-slate-800 bg-slate-50 hover:bg-slate-100 border border-slate-200 px-2 py-1 rounded-lg transition-colors duration-150"
+                  className="shrink-0 inline-flex items-center gap-1 text-xs font-semibold text-slate-600 hover:text-slate-800 bg-slate-50 hover:bg-slate-100 border border-slate-200 px-2 py-1 rounded-lg transition-colors duration-150"
                 >
                   Mark as handled
                 </button>
@@ -2572,7 +2599,7 @@ export default function AdminDashboard({
           <button
             onClick={handleRefreshMessages}
             disabled={messagesRefreshing || messagesLoading}
-            className={`inline-flex items-center gap-1 text-xs text-slate-400 hover:text-blue-600 disabled:opacity-40 transition-colors duration-150 ${!hasAlert ? "ml-auto" : ""}`}
+            className={`shrink-0 inline-flex items-center gap-1 text-xs text-slate-400 hover:text-blue-600 disabled:opacity-40 transition-colors duration-150 ${!hasAlert ? "ml-auto" : ""}`}
           >
             <RefreshCw size={10} className={messagesRefreshing ? "animate-spin" : ""} />
             Refresh
@@ -2582,7 +2609,7 @@ export default function AdminDashboard({
         {/* ── B: Conversation thread — fills all remaining height ── */}
         <div
           ref={threadRef}
-          className="flex-1 min-h-0 overflow-y-auto bg-slate-50 px-5 py-4"
+          className="flex-1 min-h-0 overflow-y-auto bg-slate-50 px-3 md:px-5 py-3 md:py-4"
         >
           {messagesLoading ? (
             <div className="flex items-center justify-center h-full">
@@ -2680,7 +2707,7 @@ export default function AdminDashboard({
         </div>
 
         {/* ── C: Reply Composer ── */}
-        <div className="shrink-0 border-t border-slate-200 bg-white px-5 py-3 space-y-2">
+        <div className="shrink-0 border-t border-slate-200 bg-white px-4 md:px-5 py-2.5 md:py-3 space-y-2">
           {/* Header: "Reply via" + channel selector */}
           {(() => {
             const canEmail    = !!selectedLead?.email;
@@ -2791,7 +2818,7 @@ export default function AdminDashboard({
         <div className="shrink-0 border-t border-slate-200 bg-white">
           <button
             onClick={() => setShowLogForm((v) => !v)}
-            className="w-full flex items-center justify-between px-5 py-2.5 text-xs font-semibold text-slate-400 hover:text-slate-600 hover:bg-slate-50 transition-colors duration-150 text-left"
+            className="w-full flex items-center justify-between px-4 md:px-5 py-2 md:py-2.5 text-xs font-semibold text-slate-400 hover:text-slate-600 hover:bg-slate-50 transition-colors duration-150 text-left"
           >
             <span>Log external conversation</span>
             <span className="text-[10px] ml-2 shrink-0">{showLogForm ? "▲" : "▼"}</span>
@@ -3369,8 +3396,8 @@ export default function AdminDashboard({
           {selectedLead ? (
             <>
               {/* Lead quick info bar */}
-              <div className="shrink-0 bg-white border-b border-slate-100 px-5 py-3">
-                <div className="flex items-start gap-3">
+              <div className="shrink-0 bg-white border-b border-slate-100 px-4 md:px-5 py-2.5 md:py-3">
+                <div className="flex items-start gap-2 md:gap-3">
                   <button
                     onClick={() => setSelectedId(null)}
                     className="lg:hidden p-1 -ml-1 rounded-lg hover:bg-slate-100 text-slate-400 shrink-0"
@@ -3380,12 +3407,20 @@ export default function AdminDashboard({
                   </button>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-semibold text-[#0f1c40] text-sm">{selectedLead.name}</span>
+                      <span className="font-semibold text-[#0f1c40] text-sm truncate max-w-[55vw] md:max-w-none">{selectedLead.name}</span>
                       <StatusBadge status={selectedLead.status} />
                       {selectedLead.urgency === "emergency" && <UrgencyBadge urgency={selectedLead.urgency} />}
                     </div>
-                    <div className="flex items-center gap-3 mt-1 text-xs text-slate-400 flex-wrap">
-                      {selectedLead.email && <span className="truncate">{selectedLead.email}</span>}
+                    {/* Mobile: single muted contact line */}
+                    <div className="md:hidden text-xs text-slate-400 truncate mt-0.5">
+                      {selectedLead.email
+                        || selectedLead.phone
+                        || (selectedLead.facebook_sender_id ? "Messenger" : "")
+                        || (selectedLead.follow_up_date ? `Follow-up ${formatMonthDay(selectedLead.follow_up_date)}` : "")}
+                    </div>
+                    {/* Desktop: full contact details */}
+                    <div className="hidden md:flex items-center gap-3 mt-1 text-xs text-slate-400 flex-wrap">
+                      {selectedLead.email && <span className="truncate max-w-[200px]">{selectedLead.email}</span>}
                       {selectedLead.phone && <span>{selectedLead.phone}</span>}
                       {selectedLead.facebook_sender_id && (
                         <span className="inline-flex items-center gap-1 text-teal-600">
@@ -3431,31 +3466,33 @@ export default function AdminDashboard({
       style={{ fontFamily: "Inter, system-ui, sans-serif" }}
     >
       {/* ── Header ── */}
-      <header className="bg-[#0f1c40] text-white px-6 h-14 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
-          <span className="font-semibold text-sm">Onward Systems</span>
-          <span className="text-white/30 text-xs">|</span>
-          <span className="text-blue-300 text-sm">Admin</span>
+      <header className="bg-[#0f1c40] text-white px-4 md:px-6 h-14 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2 md:gap-3 min-w-0">
+          <span className="font-semibold text-sm truncate">Onward Systems</span>
+          <span className="text-white/30 text-xs hidden sm:inline">|</span>
+          <span className="text-blue-300 text-sm hidden sm:inline">Admin</span>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 md:gap-3 shrink-0">
+          {/* + Add Lead lives in the Leads toolbar on mobile to keep the header uncluttered */}
           <button
             onClick={() => setShowAddLead(true)}
-            className="flex items-center gap-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg transition-colors duration-200"
+            className="hidden md:flex items-center gap-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg transition-colors duration-200"
           >
             + Add Lead
           </button>
           <button
             onClick={handleLogout}
             className="flex items-center gap-1.5 text-xs text-white/60 hover:text-white transition-colors duration-200"
+            aria-label="Sign out"
           >
             <LogOut size={14} />
-            Sign out
+            <span className="hidden sm:inline">Sign out</span>
           </button>
         </div>
       </header>
 
       {/* ── Top-level nav: Inbox | Leads ── */}
-      <div className="bg-white border-b border-slate-100 px-6 flex items-center gap-1 shrink-0">
+      <div className="bg-white border-b border-slate-100 px-2 md:px-6 flex items-center gap-1 shrink-0 overflow-x-auto">
         {([
           { id: "inbox", label: "Inbox", Icon: Inbox },
           { id: "leads", label: "Leads", Icon: Users },
@@ -3493,40 +3530,81 @@ export default function AdminDashboard({
             selectedLead ? "hidden lg:flex" : "flex"
           }`}
         >
-          {/* Overview cards */}
-          <div className="px-6 py-5 bg-white border-b border-slate-100 shrink-0">
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              {[
-                { label: "Total leads", value: stats.total, Icon: Users, color: "text-slate-600 bg-slate-100" },
-                { label: "New", value: stats.new, Icon: Inbox, color: "text-blue-600 bg-blue-50" },
-                { label: "Needs response", value: stats.needsResponse, Icon: Reply, color: "text-orange-600 bg-orange-50" },
-                { label: "Follow-up due", value: stats.followUpDue, Icon: Clock, color: "text-amber-600 bg-amber-50" },
-              ].map(({ label, value, Icon, color }) => (
-                <div
-                  key={label}
-                  className="bg-white border border-slate-100 rounded-xl p-4 flex items-center gap-3 shadow-sm"
-                >
-                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${color}`}>
-                    <Icon size={16} />
-                  </div>
-                  <div>
-                    <div className="text-2xl font-bold text-[#0f1c40] leading-none">{value}</div>
-                    <div className="text-xs text-slate-400 mt-0.5">{label}</div>
-                  </div>
+          {/* Overview stats — interactive filters. Desktop cards / mobile chips. */}
+          {(() => {
+            const STATS = [
+              { kind: "all" as const, label: "Total leads", chip: "All", value: stats.total, Icon: Users, color: "text-slate-600 bg-slate-100", active: "border-slate-300 bg-slate-50 ring-1 ring-slate-200" },
+              { kind: "new" as const, label: "New", chip: "New", value: stats.new, Icon: Inbox, color: "text-blue-600 bg-blue-50", active: "border-blue-300 bg-blue-50 ring-1 ring-blue-200" },
+              { kind: "needs" as const, label: "Needs response", chip: "Needs reply", value: stats.needsResponse, Icon: Reply, color: "text-orange-600 bg-orange-50", active: "border-orange-300 bg-orange-50 ring-1 ring-orange-200" },
+              { kind: "due" as const, label: "Follow-up due", chip: "Due", value: stats.followUpDue, Icon: Clock, color: "text-amber-600 bg-amber-50", active: "border-amber-300 bg-amber-50 ring-1 ring-amber-200" },
+            ];
+            return (
+              <div className="bg-white border-b border-slate-100 shrink-0">
+                {/* Mobile: compact horizontal chips */}
+                <div className="flex md:hidden gap-2 overflow-x-auto px-4 py-2.5">
+                  {STATS.map(({ kind, chip, value, active }) => {
+                    const isActive = activeStat === kind;
+                    return (
+                      <button
+                        key={kind}
+                        onClick={() => applyStatFilter(kind)}
+                        aria-pressed={isActive}
+                        className={`shrink-0 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border transition-colors duration-150 ${
+                          isActive ? active : "border-slate-200 text-slate-600 bg-white"
+                        }`}
+                      >
+                        {chip}
+                        <span className="font-bold text-[#0f1c40]">{value}</span>
+                      </button>
+                    );
+                  })}
                 </div>
-              ))}
-            </div>
-          </div>
 
-          {/* Filters */}
-          <div className="px-6 py-3 bg-white border-b border-slate-100 flex items-center gap-3 flex-wrap shrink-0">
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-widest">
+                {/* Desktop/tablet: clickable cards */}
+                <div className="hidden md:grid grid-cols-2 lg:grid-cols-4 gap-4 px-6 py-5">
+                  {STATS.map(({ kind, label, value, Icon, color, active }) => {
+                    const isActive = activeStat === kind;
+                    return (
+                      <button
+                        key={kind}
+                        onClick={() => applyStatFilter(kind)}
+                        aria-pressed={isActive}
+                        className={`text-left bg-white border rounded-xl p-4 flex items-center gap-3 shadow-sm min-w-0 transition-colors duration-150 ${
+                          isActive ? active : "border-slate-100 hover:border-slate-300"
+                        }`}
+                      >
+                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${color}`}>
+                          <Icon size={16} />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-2xl font-bold text-[#0f1c40] leading-none">{value}</div>
+                          <div className="text-xs text-slate-400 mt-0.5 truncate">{label}</div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Filters — compact on mobile (dropdowns collapse behind "Filters"); full row on desktop */}
+          <div className="px-4 md:px-6 py-2.5 md:py-3 bg-white border-b border-slate-100 flex items-center gap-2 md:gap-3 flex-wrap shrink-0">
+            <button
+              onClick={() => setShowFilters((v) => !v)}
+              className={`md:hidden text-sm border rounded-lg px-3 py-1.5 transition-colors duration-150 ${
+                showFilters ? "bg-slate-100 text-slate-700 border-slate-300 font-medium" : "border-slate-200 text-slate-600 bg-white"
+              }`}
+            >
+              Filters
+            </button>
+            <span className="hidden md:inline text-xs font-semibold text-slate-400 uppercase tracking-widest">
               Filter
             </span>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+              className={`${showFilters ? "block" : "hidden"} md:block text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400`}
             >
               <option value="all">All statuses</option>
               {STATUS_OPTIONS.map((s) => (
@@ -3536,7 +3614,7 @@ export default function AdminDashboard({
             <select
               value={urgencyFilter}
               onChange={(e) => setUrgencyFilter(e.target.value)}
-              className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+              className={`${showFilters ? "block" : "hidden"} md:block text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400`}
             >
               <option value="all">All urgency</option>
               <option value="emergency">Emergency</option>
@@ -3546,7 +3624,7 @@ export default function AdminDashboard({
             <select
               value={sortDir}
               onChange={(e) => setSortDir(e.target.value as "desc" | "asc")}
-              className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+              className={`${showFilters ? "block" : "hidden"} md:block text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400`}
             >
               <option value="desc">Newest first</option>
               <option value="asc">Oldest first</option>
@@ -3569,15 +3647,76 @@ export default function AdminDashboard({
                   : "border-slate-200 text-slate-600 bg-white hover:border-slate-300"
               }`}
             >
-              Needs response
+              Needs<span className="hidden sm:inline"> response</span>
             </button>
             <span className="text-xs text-slate-400 ml-auto">
               {filteredLeads.length} lead{filteredLeads.length !== 1 ? "s" : ""}
             </span>
+            <button
+              onClick={() => setShowAddLead(true)}
+              className="md:hidden text-sm font-semibold bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg transition-colors duration-200"
+            >
+              + Add
+            </button>
           </div>
 
-          {/* Table */}
-          <div className="flex-1 overflow-auto">
+          {/* Mobile: tappable lead cards (replaces the wide table below md) */}
+          <div className="flex-1 overflow-auto md:hidden bg-white divide-y divide-slate-100">
+            {filteredLeads.length === 0 ? (
+              <p className="px-4 py-14 text-center text-slate-400 text-sm">No leads found.</p>
+            ) : (
+              filteredLeads.map((lead) => (
+                <button
+                  key={lead.id}
+                  onClick={() => setSelectedId(lead.id)}
+                  className="w-full text-left px-4 py-3 hover:bg-slate-50 active:bg-slate-100 transition-colors duration-100"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-medium text-[#0f1c40] truncate">{lead.name}</div>
+                      {lead.business_name && (
+                        <div className="text-xs text-slate-400 truncate">{lead.business_name}</div>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-slate-400 shrink-0 whitespace-nowrap">
+                      {lead.last_message_at ? formatShortDateTime(lead.last_message_at) : formatDate(lead.created_at)}
+                    </span>
+                  </div>
+                  {lead.help_needed && (
+                    <div className="text-xs text-slate-500 truncate mt-1">{lead.help_needed}</div>
+                  )}
+                  <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                    {lead.source && <SourceBadge source={lead.source} />}
+                    <StatusBadge status={lead.status} />
+                    {(lead.urgency === "emergency" || lead.urgency === "priority") && <UrgencyBadge urgency={lead.urgency} />}
+                    {lead.has_unread_messages && (
+                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-100 text-teal-700">
+                        <Bell size={8} /> New
+                      </span>
+                    )}
+                    {lead.needs_response && !lead.has_unread_messages && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-orange-100 text-orange-700">
+                        Needs response
+                      </span>
+                    )}
+                    {lead.follow_up_date && (
+                      <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                        isFollowUpPastDue(lead.follow_up_date) ? "bg-red-100 text-red-600"
+                        : isFollowUpToday(lead.follow_up_date) ? "bg-amber-100 text-amber-700"
+                        : "bg-slate-100 text-slate-500"
+                      }`}>
+                        <Clock size={8} />
+                        {isFollowUpPastDue(lead.follow_up_date) ? "Overdue" : isFollowUpToday(lead.follow_up_date) ? "Due today" : formatMonthDay(lead.follow_up_date)}
+                      </span>
+                    )}
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+
+          {/* Desktop: table */}
+          <div className="hidden md:block flex-1 overflow-auto">
             <table className="min-w-full text-sm">
               <thead className="bg-white border-b border-slate-100 sticky top-0 z-10">
                 <tr>
@@ -3686,17 +3825,17 @@ export default function AdminDashboard({
         {/* ── Right panel: lead detail ── */}
         {selectedLead && (
           <div className="w-full lg:w-[560px] xl:w-[620px] bg-white border-l border-slate-100 flex flex-col overflow-hidden shrink-0 min-h-0">
-            {/* Panel header — always visible */}
-            <div className="px-6 pt-5 pb-4 border-b border-slate-100 shrink-0">
-              <div className="flex items-start justify-between">
-                <div className="flex-1 min-w-0 pr-3">
-                  <div className="font-semibold text-[#0f1c40] text-base leading-tight">
+            {/* Panel header — compact on mobile */}
+            <div className="px-4 md:px-6 pt-3 md:pt-5 pb-3 md:pb-4 border-b border-slate-100 shrink-0">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0 pr-1 md:pr-3">
+                  <div className="font-semibold text-[#0f1c40] text-base leading-tight truncate">
                     {selectedLead.name}
                   </div>
                   {selectedLead.business_name && (
-                    <div className="text-sm text-slate-500 mt-0.5">{selectedLead.business_name}</div>
+                    <div className="text-xs md:text-sm text-slate-500 mt-0.5 truncate">{selectedLead.business_name}</div>
                   )}
-                  <div className="flex items-center gap-2 mt-2 flex-wrap">
+                  <div className="flex items-center gap-1.5 md:gap-2 mt-1.5 md:mt-2 flex-wrap">
                     {selectedLead.source && <SourceBadge source={selectedLead.source} />}
                     <StatusBadge status={selectedLead.status} />
                     {selectedLead.urgency === "emergency" && (
@@ -3719,7 +3858,7 @@ export default function AdminDashboard({
                 <button
                   key={id}
                   onClick={() => setActiveTab(id)}
-                  className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold whitespace-nowrap border-b-2 -mb-px transition-colors duration-150 ${
+                  className={`flex items-center gap-1.5 px-4 py-2 md:py-2.5 text-xs font-semibold whitespace-nowrap border-b-2 -mb-px transition-colors duration-150 ${
                     activeTab === id
                       ? "text-blue-600 border-blue-600"
                       : "text-slate-400 border-transparent hover:text-slate-600 hover:border-slate-300"
@@ -3735,7 +3874,7 @@ export default function AdminDashboard({
             {activeTab === "messages" ? (
               renderMessagesTab()
             ) : (
-              <div className="flex-1 overflow-y-auto px-6 py-5">
+              <div className="flex-1 overflow-y-auto px-4 md:px-6 py-5">
                 {activeTab === "overview" && renderOverviewTab()}
                 {activeTab === "notes" && renderNotesTab()}
                 {activeTab === "timeline" && renderTimelineTab()}
