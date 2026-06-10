@@ -42,8 +42,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
 
-  if (!body.name?.trim() || !body.email?.trim()) {
-    return NextResponse.json({ error: "Name and email are required." }, { status: 400 });
+  // A lead/prospect needs at least a name or a business name — email/phone optional.
+  if (!body.name?.trim() && !body.business_name?.trim()) {
+    return NextResponse.json({ error: "A name or business name is required." }, { status: 400 });
   }
   if (body.status && !VALID_STATUSES.includes(body.status)) {
     return NextResponse.json({ error: "Invalid status." }, { status: 400 });
@@ -60,9 +61,9 @@ export async function POST(req: Request) {
   const { data: lead, error: leadError } = await supabase
     .from("leads")
     .insert({
-      name: body.name.trim(),
+      name: body.name?.trim() || body.business_name?.trim() || "Untitled",
       business_name: body.business_name?.trim() || "",
-      email: body.email.trim(),
+      email: body.email?.trim() || null,
       phone: body.phone?.trim() || null,
       website_or_facebook: body.website_or_facebook?.trim() || null,
       website_url: body.website_url?.trim() || null,
@@ -82,21 +83,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Failed to create lead." }, { status: 500 });
   }
 
-  // Insert initial message if a message body was provided (non-fatal)
-  if (body.message?.trim()) {
-    const channel = VALID_SOURCES.includes(body.source) ? body.source : "manual";
-    const { error: msgError } = await supabase
-      .from("messages")
-      .insert({
-        lead_id: lead.id,
-        channel,
-        direction: "inbound",
-        body: body.message.trim(),
-      });
-    if (msgError) {
-      console.error("[admin] message insert on lead create error:", msgError.message);
-    }
-  }
+  // Manual/prospect leads do NOT create a message thread entry — the Description
+  // is stored on the lead (message column) as context, not a real communication.
+  // Real inbound messages come from the website form (/api/contact) and webhooks.
 
   // Insert lead_created activity (non-fatal)
   const sourceName = (body.source ?? "manual");

@@ -1741,7 +1741,7 @@ export default function AdminDashboard({
   }
 
   async function handleAddLead() {
-    if (!addLeadForm.name.trim() || !addLeadForm.email.trim()) return;
+    if (!addLeadForm.name.trim() && !addLeadForm.business_name.trim()) return;
     setAddLeadSaving(true);
     try {
       const res = await fetch("/api/admin/leads", {
@@ -2382,7 +2382,7 @@ export default function AdminDashboard({
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Message / Request</label>
+              <label className="text-xs text-slate-400 block mb-1">Description</label>
               <textarea
                 value={editDraft.message}
                 onChange={(e) => setEditDraft((d) => ({ ...d, message: e.target.value }))}
@@ -2521,14 +2521,44 @@ export default function AdminDashboard({
                   />
                 )}
               </div>
-              {selectedLead.message && (
-                <div className="mt-4">
-                  <div className="text-xs text-slate-400 mb-1.5">Original message</div>
+              {/* Description (lead context — not a message) */}
+              <div className="mt-4">
+                <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">Description</div>
+                {selectedLead.message ? (
                   <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 border border-slate-100 rounded-lg p-3 whitespace-pre-wrap">
                     {selectedLead.message}
                   </p>
+                ) : (
+                  <p className="text-sm text-slate-400">—</p>
+                )}
+              </div>
+
+              {/* Notes preview — most recent few, full list in the Notes tab */}
+              <div className="mt-4">
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest">Notes</div>
+                  <button onClick={() => setActiveTab("notes")} className="text-xs font-medium text-slate-400 hover:text-blue-600 transition-colors duration-150">
+                    {noteHistory.length > 0 ? "View all" : "Add note"}
+                  </button>
                 </div>
-              )}
+                {noteHistory.length === 0 ? (
+                  <p className="text-sm text-slate-400">No notes yet</p>
+                ) : (
+                  <div className="space-y-2">
+                    {noteHistory.slice(0, 3).map((n) => (
+                      <div key={n.id} className="border-l-2 border-blue-200 pl-3">
+                        <p className="text-sm text-slate-600 whitespace-pre-wrap leading-relaxed line-clamp-2">{n.note}</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">{formatNoteDateTime(n.created_at)}</p>
+                      </div>
+                    ))}
+                    {noteHistory.length > 3 && (
+                      <button onClick={() => setActiveTab("notes")} className="text-xs font-medium text-blue-600 hover:underline">
+                        View all {noteHistory.length} notes
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </>
         )}
@@ -4206,7 +4236,7 @@ export default function AdminDashboard({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">
-                    Name <span className="text-red-400">*</span>
+                    Name
                   </label>
                   <input
                     type="text"
@@ -4230,7 +4260,7 @@ export default function AdminDashboard({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">
-                    Email <span className="text-red-400">*</span>
+                    Email
                   </label>
                   <input
                     type="email"
@@ -4301,12 +4331,13 @@ export default function AdminDashboard({
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">
-                  Message
+                  Description
                 </label>
                 <textarea
                   rows={3}
                   value={addLeadForm.message}
                   onChange={(e) => setAddLeadForm((f) => ({ ...f, message: e.target.value }))}
+                  placeholder="Example: Found on Facebook. Seems active, may need a better lead system."
                   className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400 resize-none leading-relaxed"
                 />
               </div>
@@ -4373,7 +4404,7 @@ export default function AdminDashboard({
               </button>
               <button
                 onClick={handleAddLead}
-                disabled={addLeadSaving || !addLeadForm.name.trim() || !addLeadForm.email.trim()}
+                disabled={addLeadSaving || (!addLeadForm.name.trim() && !addLeadForm.business_name.trim())}
                 className="text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {addLeadSaving ? "Saving..." : "Add lead"}
