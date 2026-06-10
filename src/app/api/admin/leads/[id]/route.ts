@@ -134,6 +134,16 @@ export async function PATCH(
     updates.website_or_facebook = v || null;
   }
 
+  if ("website_url" in body) {
+    const v = typeof body.website_url === "string" ? body.website_url.trim() : "";
+    updates.website_url = v || null;
+  }
+
+  if ("facebook_url" in body) {
+    const v = typeof body.facebook_url === "string" ? body.facebook_url.trim() : "";
+    updates.facebook_url = v || null;
+  }
+
   if ("business_type" in body) {
     const v = typeof body.business_type === "string" ? body.business_type.trim() : "";
     updates.business_type = v || null;
@@ -311,7 +321,7 @@ export async function PATCH(
   // Detail fields update (generic) — excludes help_needed when handled above
   const DETAIL_FIELDS = [
     "name", "business_name", "email", "phone",
-    "website_or_facebook", "business_type", "help_needed", "message", "urgency",
+    "website_or_facebook", "website_url", "facebook_url", "business_type", "help_needed", "message", "urgency",
   ];
   const changedDetails = DETAIL_FIELDS.filter((f) => f in body && !(f === "help_needed" && helpHandled));
   if (changedDetails.length > 0) {

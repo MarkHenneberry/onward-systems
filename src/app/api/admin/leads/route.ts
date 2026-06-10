@@ -65,6 +65,8 @@ export async function POST(req: Request) {
       email: body.email.trim(),
       phone: body.phone?.trim() || null,
       website_or_facebook: body.website_or_facebook?.trim() || null,
+      website_url: body.website_url?.trim() || null,
+      facebook_url: body.facebook_url?.trim() || null,
       business_type: body.business_type?.trim() || null,
       help_needed: body.help_needed?.trim() || null,
       message: body.message?.trim() || null,

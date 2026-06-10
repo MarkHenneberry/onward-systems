@@ -38,6 +38,8 @@ export type Lead = {
   email: string | null;
   phone: string | null;
   website_or_facebook: string | null;
+  website_url: string | null;
+  facebook_url: string | null;
   business_type: string | null;
   help_needed: string | null;
   message: string | null;
@@ -213,6 +215,24 @@ function hasProspectData(l: Lead): boolean {
     (!!l.outreach_status && l.outreach_status !== "not_contacted") ||
     (!!l.prospect_checklist && Object.keys(l.prospect_checklist).length > 0)
   );
+}
+
+function isFacebookUrl(u: string): boolean {
+  const s = u.toLowerCase();
+  return s.includes("facebook.com") || s.includes("fb.com") || s.includes("fb.me");
+}
+function hrefFor(u: string): string {
+  return u.startsWith("http") ? u : `https://${u}`;
+}
+// Resolves a lead's Website and Facebook links, falling back to the legacy
+// combined website_or_facebook field by URL type so old data isn't lost.
+function effectiveLinks(lead: Lead): { website: string | null; facebook: string | null } {
+  const legacy = lead.website_or_facebook?.trim() || null;
+  const legacyIsFb = legacy ? isFacebookUrl(legacy) : false;
+  return {
+    website: lead.website_url?.trim() || (legacy && !legacyIsFb ? legacy : null),
+    facebook: lead.facebook_url?.trim() || (legacy && legacyIsFb ? legacy : null),
+  };
 }
 
 const SOURCE_OPTIONS = [
@@ -822,7 +842,8 @@ export default function AdminDashboard({
     business_name: "",
     email: "",
     phone: "",
-    website_or_facebook: "",
+    website_url: "",
+    facebook_url: "",
     business_type: "",
     help_needed: "",
     message: "",
@@ -860,7 +881,8 @@ export default function AdminDashboard({
     business_name: "",
     email: "",
     phone: "",
-    website_or_facebook: "",
+    website_url: "",
+    facebook_url: "",
     business_type: "",
     help_needed: "",
     message: "",
@@ -1736,7 +1758,8 @@ export default function AdminDashboard({
           business_name: "",
           email: "",
           phone: "",
-          website_or_facebook: "",
+          website_url: "",
+          facebook_url: "",
           business_type: "",
           help_needed: "",
           message: "",
@@ -1800,12 +1823,14 @@ export default function AdminDashboard({
 
   function handleEditDetails() {
     if (!selectedLead) return;
+    const links = effectiveLinks(selectedLead);
     setEditDraft({
       name: selectedLead.name ?? "",
       business_name: selectedLead.business_name ?? "",
       email: selectedLead.email ?? "",
       phone: selectedLead.phone ?? "",
-      website_or_facebook: selectedLead.website_or_facebook ?? "",
+      website_url: links.website ?? "",
+      facebook_url: links.facebook ?? "",
       business_type: selectedLead.business_type ?? "",
       help_needed: selectedLead.help_needed ?? "",
       message: selectedLead.message ?? "",
@@ -1820,33 +1845,27 @@ export default function AdminDashboard({
     setEditSaving(true);
     setEditFeedback(null);
     try {
+      // Writes the typed fields and clears the legacy combined field, migrating the
+      // lead's link data into website_url / facebook_url as it's edited.
+      const saved = {
+        name: editDraft.name.trim(),
+        business_name: editDraft.business_name.trim(),
+        email: editDraft.email.trim() || null,
+        phone: editDraft.phone.trim() || null,
+        website_url: editDraft.website_url.trim() || null,
+        facebook_url: editDraft.facebook_url.trim() || null,
+        website_or_facebook: null,
+        business_type: editDraft.business_type.trim() || null,
+        help_needed: editDraft.help_needed.trim() || null,
+        message: editDraft.message.trim() || null,
+        urgency: editDraft.urgency,
+      };
       const res = await fetch(`/api/admin/leads/${selectedId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: editDraft.name.trim(),
-          business_name: editDraft.business_name.trim(),
-          email: editDraft.email.trim() || null,
-          phone: editDraft.phone.trim() || null,
-          website_or_facebook: editDraft.website_or_facebook.trim() || null,
-          business_type: editDraft.business_type.trim() || null,
-          help_needed: editDraft.help_needed.trim() || null,
-          message: editDraft.message.trim() || null,
-          urgency: editDraft.urgency,
-        }),
+        body: JSON.stringify(saved),
       });
       if (res.ok) {
-        const saved = {
-          name: editDraft.name.trim(),
-          business_name: editDraft.business_name.trim(),
-          email: editDraft.email.trim() || null,
-          phone: editDraft.phone.trim() || null,
-          website_or_facebook: editDraft.website_or_facebook.trim() || null,
-          business_type: editDraft.business_type.trim() || null,
-          help_needed: editDraft.help_needed.trim() || null,
-          message: editDraft.message.trim() || null,
-          urgency: editDraft.urgency,
-        };
         setLeads((prev) => prev.map((l) => l.id === selectedId ? { ...l, ...saved } : l));
         setIsEditingDetails(false);
         setEditFeedback({ type: "success", text: "Lead updated." });
@@ -2333,17 +2352,24 @@ export default function AdminDashboard({
               </div>
             </div>
 
-            {!selectedLead.facebook_sender_id && (
-              <div>
-                <label className="text-xs text-slate-400 block mb-1">Website / Facebook</label>
-                <input
-                  type="text"
-                  value={editDraft.website_or_facebook}
-                  onChange={(e) => setEditDraft((d) => ({ ...d, website_or_facebook: e.target.value }))}
-                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
-                />
-              </div>
-            )}
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Website</label>
+              <input
+                type="text"
+                value={editDraft.website_url}
+                onChange={(e) => setEditDraft((d) => ({ ...d, website_url: e.target.value }))}
+                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Facebook</label>
+              <input
+                type="text"
+                value={editDraft.facebook_url}
+                onChange={(e) => setEditDraft((d) => ({ ...d, facebook_url: e.target.value }))}
+                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+              />
+            </div>
 
             <div>
               <label className="text-xs text-slate-400 block mb-1">Service / Help needed</label>
@@ -2445,26 +2471,29 @@ export default function AdminDashboard({
                     ) : undefined
                   }
                 />
-                <InfoRow
-                  label="Website / FB"
-                  value={
-                    selectedLead.facebook_sender_id ? (
-                      <span className="text-slate-600">
-                        Facebook Messenger
-                        <span className="ml-1.5 text-xs text-teal-600 font-medium">· Connected</span>
-                      </span>
-                    ) : selectedLead.website_or_facebook ? (
-                      <a
-                        href={selectedLead.website_or_facebook.startsWith("http") ? selectedLead.website_or_facebook : `https://${selectedLead.website_or_facebook}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 hover:underline"
-                      >
-                        {selectedLead.website_or_facebook}
-                      </a>
-                    ) : "—"
-                  }
-                />
+                {(() => {
+                  const links = effectiveLinks(selectedLead);
+                  const linkVal = (u: string | null) =>
+                    u ? (
+                      <a href={hrefFor(u)} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline break-all">{u}</a>
+                    ) : "—";
+                  return (
+                    <>
+                      <InfoRow label="Website" value={linkVal(links.website)} />
+                      <InfoRow label="Facebook" value={linkVal(links.facebook)} />
+                      <InfoRow
+                        label="Messenger"
+                        value={
+                          selectedLead.facebook_sender_id ? (
+                            <span className="text-teal-600 font-medium">Connected</span>
+                          ) : (selectedLead.source === "facebook" || links.facebook) ? (
+                            <span className="text-amber-600 font-medium">Not connected</span>
+                          ) : "—"
+                        }
+                      />
+                    </>
+                  );
+                })()}
                 <InfoRow label="Business type" value={selectedLead.business_type || "—"} />
               </div>
             </div>
@@ -4222,16 +4251,29 @@ export default function AdminDashboard({
                   />
                 </div>
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">
-                  Website / Facebook
-                </label>
-                <input
-                  type="text"
-                  value={addLeadForm.website_or_facebook}
-                  onChange={(e) => setAddLeadForm((f) => ({ ...f, website_or_facebook: e.target.value }))}
-                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">
+                    Website
+                  </label>
+                  <input
+                    type="text"
+                    value={addLeadForm.website_url}
+                    onChange={(e) => setAddLeadForm((f) => ({ ...f, website_url: e.target.value }))}
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1.5">
+                    Facebook
+                  </label>
+                  <input
+                    type="text"
+                    value={addLeadForm.facebook_url}
+                    onChange={(e) => setAddLeadForm((f) => ({ ...f, facebook_url: e.target.value }))}
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                  />
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
