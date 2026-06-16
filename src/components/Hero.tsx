@@ -1,4 +1,4 @@
-import { ArrowRight, MapPin, CheckCircle2 } from "lucide-react";
+import { ArrowRight, MapPin, CheckCircle2, Calendar } from "lucide-react";
 import { Boxes } from "@/components/ui/background-boxes";
 
 export default function Hero() {
@@ -34,22 +34,23 @@ export default function Hero() {
             </div>
 
             <h1 className="text-4xl md:text-5xl lg:text-[3.25rem] font-bold text-white leading-[1.12] tracking-tight mb-6">
-              Simple systems that help your business{" "}
+              Custom websites and lead systems that help your business{" "}
               <span className="text-blue-400">move forward.</span>
             </h1>
 
             <p className="text-lg text-blue-100/75 leading-[1.75] mb-10 max-w-lg">
-              Onward Systems builds websites and practical business tools for local service
+              Onward Systems builds custom websites and practical lead systems for local service
               companies across Halifax and HRM.
               <span className="block mt-3">
                 From cleaner lead intake and customer communication to AI-assisted admin
-                tools, everything is built to help your business run more smoothly.
+                tools, everything is built around your business and how it actually works —
+                not a generic template.
               </span>
             </p>
 
             <div className="flex flex-wrap gap-3 mb-10">
               <a href="#contact" className="btn-primary text-base px-7 py-3.5 pointer-events-auto">
-                Get a free systems review
+                Build your custom system
                 <ArrowRight size={18} />
               </a>
               <a href="#how-it-works" className="btn-ghost-white text-base px-7 py-3.5 pointer-events-auto">
@@ -102,71 +103,102 @@ export default function Hero() {
 }
 
 function HeroDashboard() {
+  const navItems = [
+    { label: "Inbox", badge: 2, active: false },
+    { label: "Leads", active: true },
+    { label: "Calendar", active: false },
+  ];
+
+  const leads = [
+    { name: "Lead One", channel: "Website", channelClass: "bg-blue-500/20 text-blue-200", badge: "New", badgeClass: "bg-blue-500/20 text-blue-200" },
+    { name: "Lead Two", channel: "Email", channelClass: "bg-amber-500/20 text-amber-200", badge: "Needs response", badgeClass: "bg-orange-500/20 text-orange-200", selected: true },
+    { name: "Lead Three", channel: "Facebook", channelClass: "bg-indigo-500/20 text-indigo-200", badge: "New message", badgeClass: "bg-teal-500/20 text-teal-200" },
+  ];
+
   return (
     <div className="w-full max-w-sm mx-auto lg:mx-0 pointer-events-auto">
       {/* Outer card */}
-      <div className="bg-white/8 backdrop-blur-md border border-white/15 rounded-2xl p-4 shadow-2xl ring-1 ring-white/5">
-        {/* Header bar */}
-        <div className="flex items-center justify-between mb-4 px-1">
-          <span className="text-xs font-semibold text-white/50 uppercase tracking-widest">Lead System</span>
-          <span className="flex items-center gap-1.5 text-xs text-green-400 font-medium">
+      <div className="bg-white/8 backdrop-blur-md border border-white/15 rounded-2xl p-3.5 shadow-2xl ring-1 ring-white/5">
+        {/* Brand bar */}
+        <div className="flex items-center justify-between mb-3 px-1">
+          <span className="text-xs font-semibold text-white/55">Onward Systems</span>
+          <span className="flex items-center gap-1.5 text-[11px] text-green-400 font-medium">
             <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-            Active
+            Live
           </span>
         </div>
 
-        {/* Activity feed */}
-        <div className="space-y-2.5 mb-4">
-          {[
-            { icon: "🟢", label: "New lead received", time: "just now", bold: true },
-            { icon: "✉️", label: "Auto-reply sent", time: "just now" },
-            { icon: "📋", label: "Lead logged", time: "just now" },
-            { icon: "📅", label: "Follow-up scheduled", time: "just now" },
-          ].map((item, i) => (
-            <div
-              key={i}
-              className={`flex items-center justify-between rounded-xl px-3.5 py-2.5 ${
-                i === 0
-                  ? "bg-blue-500/20 border border-blue-400/20"
-                  : "bg-white/5 border border-white/5"
+        {/* Mini top nav */}
+        <div className="flex items-center gap-1 mb-3 border-b border-white/10 pb-2">
+          {navItems.map((item) => (
+            <span
+              key={item.label}
+              className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg ${
+                item.active ? "bg-white/10 text-white" : "text-white/45"
               }`}
             >
-              <div className="flex items-center gap-2.5">
-                <span className="text-base leading-none">{item.icon}</span>
-                <span
-                  className={`text-sm ${
-                    item.bold ? "text-white font-semibold" : "text-white/70"
-                  }`}
-                >
-                  {item.label}
+              {item.label}
+              {item.badge && (
+                <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-orange-500 text-white text-[10px] font-bold">
+                  {item.badge}
+                </span>
+              )}
+            </span>
+          ))}
+        </div>
+
+        {/* Conversation / lead list */}
+        <div className="space-y-1.5 mb-3">
+          {leads.map((lead) => (
+            <div
+              key={lead.name}
+              className={`flex items-center justify-between gap-2 rounded-xl px-3 py-2 ${
+                lead.selected ? "bg-blue-500/20 border border-blue-400/25" : "bg-white/5 border border-white/5"
+              }`}
+            >
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-white truncate">{lead.name}</div>
+                <span className={`inline-block mt-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded ${lead.channelClass}`}>
+                  {lead.channel}
                 </span>
               </div>
-              <span className="text-xs text-white/35">{item.time}</span>
+              <span className={`shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${lead.badgeClass}`}>
+                {lead.badge}
+              </span>
             </div>
           ))}
         </div>
 
-        {/* Stats row */}
-        <div className="grid grid-cols-3 gap-2">
-          {[
-            { value: "24", label: "Leads this month" },
-            { value: "18", label: "Quotes sent" },
-            { value: "11", label: "Jobs booked" },
-          ].map((stat) => (
-            <div
-              key={stat.label}
-              className="bg-white/5 border border-white/8 rounded-xl p-3 text-center"
-            >
-              <div className="text-xl font-bold text-white">{stat.value}</div>
-              <div className="text-[10px] text-white/45 mt-0.5 leading-tight">{stat.label}</div>
+        {/* Selected lead detail */}
+        <div className="bg-white/5 border border-white/10 rounded-xl p-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-semibold text-white">Lead Two</span>
+            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-200">New</span>
+          </div>
+          <div className="space-y-1 text-[11px]">
+            <div className="flex justify-between">
+              <span className="text-white/40">Urgency</span>
+              <span className="text-white/75">Normal</span>
             </div>
-          ))}
+            <div className="flex justify-between">
+              <span className="text-white/40">Follow-up</span>
+              <span className="text-white/75">Tomorrow</span>
+            </div>
+            <div className="flex justify-between gap-3">
+              <span className="text-white/40 shrink-0">Notes</span>
+              <span className="text-white/75 truncate">Quote requested</span>
+            </div>
+          </div>
+          <div className="mt-2.5 flex items-center justify-center gap-1.5 bg-blue-500/90 text-white text-xs font-semibold rounded-lg py-1.5">
+            <Calendar size={12} />
+            Schedule follow-up
+          </div>
         </div>
       </div>
 
-      {/* Floating label below */}
+      {/* Caption below */}
       <p className="text-center text-xs text-blue-300/50 mt-3">
-        Example lead intake dashboard
+        Example custom lead dashboard
       </p>
     </div>
   );

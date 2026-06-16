@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import Image from "next/image";
-import Link from "next/link";
 import { Menu, X } from "lucide-react";
 
 const navLinks = [
@@ -23,8 +22,17 @@ export default function Header() {
     >
       <div className="max-w-6xl mx-auto px-6 md:px-10">
         <div className="flex items-center justify-between h-16">
-          {/* Logo */}
-          <Link href="/" className="flex items-center shrink-0 bg-transparent border-0 outline-none">
+          {/* Logo — scrolls back to the top of the page from any section */}
+          <a
+            href="#top"
+            onClick={(e) => {
+              e.preventDefault();
+              setMenuOpen(false);
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+            className="flex items-center shrink-0 bg-transparent border-0 outline-none"
+            aria-label="Onward Systems — back to top"
+          >
             <Image
               src="/images/logo-transparent.png"
               alt="Onward Systems"
@@ -34,7 +42,7 @@ export default function Header() {
               priority
               style={{ background: "transparent" }}
             />
-          </Link>
+          </a>
 
           {/* Desktop nav */}
           <nav className="hidden lg:flex items-center gap-7">

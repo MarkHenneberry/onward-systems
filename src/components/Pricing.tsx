@@ -2,6 +2,7 @@ import { Check, ArrowRight } from "lucide-react";
 
 type PricingTier = {
   name: string;
+  label: string;
   price: string;
   priceSub?: string;
   description: string;
@@ -14,45 +15,38 @@ type PricingTier = {
 
 const tiers: PricingTier[] = [
   {
-    name: "Free Systems Review",
-    price: "$0",
-    description: "A clear look at where things stand.",
+    name: "Minimum Package",
+    label: "Website Foundation",
+    price: "$299 setup",
+    priceSub: "+ $30/year for domain",
+    description:
+      "A simple custom website foundation for local service businesses that need a clean, professional online presence.",
     features: [
-      "Online presence gaps identified",
-      "Lead and follow-up issues noted",
-      "Practical next steps",
-      "Delivered within 1 to 2 business days",
-    ],
-    cta: "Request Free Review",
-    ctaHref: "#contact",
-  },
-  {
-    name: "Website Foundation",
-    price: "$99",
-    priceSub: "setup + $10/mo",
-    description: "A simple online presence for local service businesses.",
-    features: [
-      "Mobile-friendly website",
-      "Hosting and maintenance",
+      "Custom mobile-friendly website",
       "Contact form",
       "Basic SEO setup",
+      "Hosting and maintenance setup",
       "Domain connection support",
+      "Built around your business, not a generic template",
     ],
     cta: "Start With Website",
     ctaHref: "#contact",
   },
   {
-    name: "Lead & Admin System",
-    price: "$199",
-    priceSub: "setup + $50/mo",
-    description: "Lead handling and customer communication built into your website.",
+    name: "Premium System Package",
+    label: "Lead & Admin System",
+    price: "$299 setup",
+    priceSub: "+ $50/month",
+    description:
+      "A custom lead and admin system built into your website so customer inquiries, follow-ups, scheduling, and messages are easier to manage.",
     features: [
-      "Everything in Website Foundation",
-      "Lead storage system",
-      "Email notifications",
-      "Customer auto-replies",
-      "Urgency tagging",
-      "Simple admin organization",
+      "Everything in Minimum Package (no extra setup cost)",
+      "Backend admin dashboard",
+      "Lead handling and status tracking",
+      "Calendar and follow-up scheduling",
+      "Messaging / inbox integration",
+      "Notes and customer history",
+      "Built around your actual workflow",
     ],
     cta: "Build Lead System",
     ctaHref: "#contact",
@@ -60,19 +54,22 @@ const tiers: PricingTier[] = [
     tag: "Most requested",
   },
   {
-    name: "Full Systems Package",
-    price: "From $499",
-    priceSub: "setup + $75/mo",
-    description: "Custom systems built around how your business actually operates.",
+    name: "Superior System Package",
+    label: "Custom AI & Integrations",
+    price: "From $749 setup",
+    priceSub: "+ $99/month",
+    description:
+      "A custom system package for businesses that need more automation, AI assistance, or integrations tailored to how they operate.",
     features: [
-      "Custom website structure",
-      "Advanced intake and workflow setup",
-      "Operational organization tools",
-      "Customer communication systems",
-      "AI-assisted follow-ups and lead handling",
-      "Scoped automations tailored to your business",
+      "Everything in Premium System Package included",
+      "AI-assisted lead handling or follow-up support",
+      "Custom workflow automations",
+      "Advanced intake and routing",
+      "Custom integrations upon request",
+      "Built around your business process",
+      "Scoped before work begins",
     ],
-    cta: "Plan Full System",
+    cta: "Plan Custom System",
     ctaHref: "#contact",
   },
 ];
@@ -85,16 +82,17 @@ export default function Pricing() {
         <div className="max-w-2xl mb-12">
           <p className="section-eyebrow">Pricing</p>
           <h2 className="text-3xl md:text-4xl font-bold text-[#0f1c40] mb-4">
-            Simple, honest pricing.
+            Custom systems, honest pricing.
           </h2>
           <p className="text-lg text-slate-600 leading-relaxed">
-            No surprises. Every project is scoped before any work begins. Monthly fees cover
-            hosting, maintenance, monitoring, and ongoing system support.
+            No surprises. Every project is scoped before any work begins, and each system is
+            built around the business and workflow. Monthly fees cover hosting, maintenance,
+            monitoring, and ongoing support.
           </p>
         </div>
 
         {/* Grid */}
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           {tiers.map((tier) => (
             <PricingCard key={tier.name} tier={tier} />
           ))}
@@ -102,8 +100,9 @@ export default function Pricing() {
 
         {/* Supporting note */}
         <p className="text-center text-sm text-slate-400 mt-8 max-w-2xl mx-auto leading-relaxed">
-          All pricing reflects common starting points for local service businesses. Final scope
-          depends on the business, the systems needed, and how much ongoing support is required.
+          Pricing is based on common starting points for local service businesses. Every setup is
+          scoped before work begins, and systems are customized around the business, workflow, and
+          level of ongoing support required.
         </p>
       </div>
     </section>
@@ -129,13 +128,20 @@ function PricingCard({ tier }: { tier: PricingTier }) {
 
       <div className="mb-5">
         <h3
-          className={`text-base font-semibold mb-2 ${
+          className={`text-base font-semibold ${
             tier.highlight ? "text-white" : "text-[#0f1c40]"
           }`}
         >
           {tier.name}
         </h3>
-        <div className="mb-1">
+        <p
+          className={`text-xs font-medium uppercase tracking-widest mb-3 ${
+            tier.highlight ? "text-blue-300/80" : "text-blue-600/80"
+          }`}
+        >
+          {tier.label}
+        </p>
+        <div>
           <span
             className={`text-3xl font-bold ${
               tier.highlight ? "text-white" : "text-[#0f1c40]"
@@ -143,18 +149,18 @@ function PricingCard({ tier }: { tier: PricingTier }) {
           >
             {tier.price}
           </span>
-          {tier.priceSub && (
-            <span
-              className={`text-sm ml-1.5 ${
-                tier.highlight ? "text-blue-300/70" : "text-slate-400"
-              }`}
-            >
-              {tier.priceSub}
-            </span>
-          )}
         </div>
+        {tier.priceSub && (
+          <div
+            className={`text-sm mt-0.5 ${
+              tier.highlight ? "text-blue-300/70" : "text-slate-400"
+            }`}
+          >
+            {tier.priceSub}
+          </div>
+        )}
         <p
-          className={`text-sm leading-snug ${
+          className={`text-sm leading-snug mt-3 ${
             tier.highlight ? "text-blue-200/70" : "text-slate-500"
           }`}
         >

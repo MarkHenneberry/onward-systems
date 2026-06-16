@@ -14,6 +14,7 @@ import Footer from "@/components/Footer";
 export default function Home() {
   return (
     <>
+      <span id="top" aria-hidden="true" />
       <Header />
       <main>
         <Hero />
