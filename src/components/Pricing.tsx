@@ -18,7 +18,7 @@ const tiers: PricingTier[] = [
     name: "Minimum Package",
     label: "Website Foundation",
     price: "$299 setup",
-    priceSub: "+ $30/year for domain",
+    priceSub: "+ $29/year for domain",
     description:
       "A simple custom website foundation for local service businesses that need a clean, professional online presence.",
     features: [
@@ -36,7 +36,7 @@ const tiers: PricingTier[] = [
     name: "Premium System Package",
     label: "Lead & Admin System",
     price: "$299 setup",
-    priceSub: "+ $50/month",
+    priceSub: "+ $49/month",
     description:
       "A custom lead and admin system built into your website so customer inquiries, follow-ups, scheduling, and messages are easier to manage.",
     features: [
