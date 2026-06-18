@@ -822,6 +822,10 @@ export default function AdminDashboard({
   const [needsResponseFilter, setNeedsResponseFilter] = useState(false);
   const [followUpDueFilter, setFollowUpDueFilter] = useState(false);
   const [showFilters, setShowFilters] = useState(false); // mobile collapsible dropdowns
+  // Prospecting view controls (active when statusFilter === "prospect")
+  const [prospectOutreachFilter, setProspectOutreachFilter] = useState<"all" | string>("all");
+  const [prospectSort, setProspectSort] = useState<"newest" | "oldest" | "followup" | "fit" | "updated">("newest");
+  const [showProspectsSection, setShowProspectsSection] = useState(false); // collapsible Prospects group in normal mode
   const [messagesRefreshing, setMessagesRefreshing] = useState(false);
   const [showLogForm, setShowLogForm] = useState(false);
   const [replyChannel, setReplyChannel] = useState("email");
@@ -1371,20 +1375,65 @@ export default function AdminDashboard({
     };
   }, [leads]);
 
-  // Filtered + sorted leads
+  const prospectMode = statusFilter === "prospect";
+
+  // Prospect-specific sort comparator
+  function prospectSortCmp(a: Lead, b: Lead): number {
+    const t = (iso: string | null) => (iso ? new Date(iso).getTime() : 0);
+    switch (prospectSort) {
+      case "oldest": return t(a.created_at) - t(b.created_at);
+      case "fit": return (b.fit_score ?? 0) - (a.fit_score ?? 0);
+      case "updated": return t(b.updated_at) - t(a.updated_at) || t(b.created_at) - t(a.created_at);
+      case "followup": {
+        // leads with a follow-up date first (soonest), then those without
+        const av = a.follow_up_date ? t(a.follow_up_date) : Infinity;
+        const bv = b.follow_up_date ? t(b.follow_up_date) : Infinity;
+        return av - bv;
+      }
+      case "newest":
+      default: return t(b.created_at) - t(a.created_at);
+    }
+  }
+
+  // Main list. In prospect mode: only prospects (+ outreach filter + prospect sort).
+  // In normal mode: everything EXCEPT prospects (those live in the collapsible section).
   const filteredLeads = useMemo(() => {
-    let out = dedupeLeadsById(leads); // final guard against duplicate React keys
+    let out = dedupeLeadsById(leads);
+    if (prospectMode) {
+      out = out.filter((l) => l.status === "prospect");
+      if (prospectOutreachFilter !== "all") {
+        out = out.filter((l) => (l.outreach_status ?? "not_contacted") === prospectOutreachFilter);
+      }
+      if (urgencyFilter !== "all") out = out.filter((l) => l.urgency === urgencyFilter);
+      if (needsResponseFilter) out = out.filter((l) => l.needs_response);
+      if (followUpDueFilter) out = out.filter((l) => l.follow_up_date && isFollowUpOverdue(l.follow_up_date));
+      out.sort(prospectSortCmp);
+      return out;
+    }
+    out = out.filter((l) => l.status !== "prospect");
     if (statusFilter !== "all") out = out.filter((l) => l.status === statusFilter);
     if (urgencyFilter !== "all") out = out.filter((l) => l.urgency === urgencyFilter);
     if (needsResponseFilter) out = out.filter((l) => l.needs_response);
     if (followUpDueFilter) out = out.filter((l) => l.follow_up_date && isFollowUpOverdue(l.follow_up_date));
     out.sort((a, b) => {
-      const diff =
-        new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      const diff = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
       return sortDir === "desc" ? -diff : diff;
     });
     return out;
-  }, [leads, statusFilter, urgencyFilter, sortDir, needsResponseFilter, followUpDueFilter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leads, statusFilter, urgencyFilter, sortDir, needsResponseFilter, followUpDueFilter, prospectMode, prospectOutreachFilter, prospectSort]);
+
+  // Prospects for the collapsible section (normal mode), newest first.
+  const prospectSectionLeads = useMemo(
+    () => dedupeLeadsById(leads).filter((l) => l.status === "prospect")
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+    [leads]
+  );
+
+  // Default the Prospects section open on desktop (collapsed on mobile) when prospects exist.
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.innerWidth >= 768) setShowProspectsSection(true);
+  }, []);
 
   // Active stat-filter derived from the underlying filter states (kept in sync with
   // the status dropdown / Needs response button so there are no stale highlights).
@@ -3660,16 +3709,45 @@ export default function AdminDashboard({
             <span className="hidden md:inline text-xs font-semibold text-slate-400 uppercase tracking-widest">
               Filter
             </span>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className={`${showFilters ? "block" : "hidden"} md:block text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400`}
-            >
-              <option value="all">All statuses</option>
-              {STATUS_OPTIONS.map((s) => (
-                <option key={s} value={s}>{STATUS_LABELS[s]}</option>
-              ))}
-            </select>
+            {!prospectMode && (
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className={`${showFilters ? "block" : "hidden"} md:block text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400`}
+              >
+                <option value="all">All statuses</option>
+                {STATUS_OPTIONS.map((s) => (
+                  <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+                ))}
+              </select>
+            )}
+
+            {/* Prospect-only controls — outreach filter + prospect sort */}
+            {prospectMode && (
+              <>
+                <select
+                  value={prospectOutreachFilter}
+                  onChange={(e) => setProspectOutreachFilter(e.target.value)}
+                  className="text-sm border border-violet-200 rounded-lg px-3 py-1.5 text-violet-700 bg-violet-50 focus:outline-none focus:border-violet-400"
+                >
+                  <option value="all">All prospects</option>
+                  {OUTREACH_STATUS_OPTIONS.map((s) => (
+                    <option key={s} value={s}>{OUTREACH_STATUS_LABELS[s]}</option>
+                  ))}
+                </select>
+                <select
+                  value={prospectSort}
+                  onChange={(e) => setProspectSort(e.target.value as typeof prospectSort)}
+                  className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400"
+                >
+                  <option value="newest">Newest first</option>
+                  <option value="oldest">Oldest first</option>
+                  <option value="followup">Follow-up date</option>
+                  <option value="fit">Fit score (high→low)</option>
+                  <option value="updated">Recently updated</option>
+                </select>
+              </>
+            )}
             <select
               value={urgencyFilter}
               onChange={(e) => setUrgencyFilter(e.target.value)}
@@ -3680,14 +3758,16 @@ export default function AdminDashboard({
               <option value="priority">Priority</option>
               <option value="normal">Normal</option>
             </select>
-            <select
-              value={sortDir}
-              onChange={(e) => setSortDir(e.target.value as "desc" | "asc")}
-              className={`${showFilters ? "block" : "hidden"} md:block text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400`}
-            >
-              <option value="desc">Newest first</option>
-              <option value="asc">Oldest first</option>
-            </select>
+            {!prospectMode && (
+              <select
+                value={sortDir}
+                onChange={(e) => setSortDir(e.target.value as "desc" | "asc")}
+                className={`${showFilters ? "block" : "hidden"} md:block text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 bg-white focus:outline-none focus:border-blue-400`}
+              >
+                <option value="desc">Newest first</option>
+                <option value="asc">Oldest first</option>
+              </select>
+            )}
             <button
               onClick={() => setStatusFilter((s) => (s === "prospect" ? "all" : "prospect"))}
               className={`text-sm border rounded-lg px-3 py-1.5 transition-colors duration-150 ${
@@ -3719,8 +3799,10 @@ export default function AdminDashboard({
             </button>
           </div>
 
+          {/* Single scroller holding the main list + the collapsible Prospects section */}
+          <div className="flex-1 overflow-auto">
           {/* Mobile: tappable lead cards (replaces the wide table below md) */}
-          <div className="flex-1 overflow-auto md:hidden bg-white divide-y divide-slate-100">
+          <div className="md:hidden bg-white divide-y divide-slate-100">
             {filteredLeads.length === 0 ? (
               <p className="px-4 py-14 text-center text-slate-400 text-sm">No leads found.</p>
             ) : (
@@ -3775,7 +3857,7 @@ export default function AdminDashboard({
           </div>
 
           {/* Desktop: table */}
-          <div className="hidden md:block flex-1 overflow-auto">
+          <div className="hidden md:block">
             <table className="min-w-full text-sm">
               <thead className="bg-white border-b border-slate-100 sticky top-0 z-10">
                 <tr>
@@ -3878,6 +3960,69 @@ export default function AdminDashboard({
                 )}
               </tbody>
             </table>
+          </div>
+
+          {/* Collapsible Prospects section — normal mode only (prospects are excluded from the main list above) */}
+          {!prospectMode && prospectSectionLeads.length > 0 && (
+            <div className="border-t border-slate-200 bg-white">
+              <div className="flex items-center gap-2 px-4 md:px-6 py-2.5">
+                <button
+                  onClick={() => setShowProspectsSection((v) => !v)}
+                  className="flex items-center gap-2 flex-1 text-left"
+                >
+                  <span className={`text-[10px] text-slate-400 transition-transform ${showProspectsSection ? "rotate-90" : ""}`}>▶</span>
+                  <span className="text-xs font-semibold text-violet-600 uppercase tracking-widest">Prospects</span>
+                  <span className="text-xs text-slate-400">{prospectSectionLeads.length}</span>
+                </button>
+                <button
+                  onClick={() => setStatusFilter("prospect")}
+                  className="text-xs font-medium text-slate-400 hover:text-violet-600 transition-colors duration-150"
+                >
+                  View all
+                </button>
+              </div>
+              {showProspectsSection && (
+                <div className="divide-y divide-slate-50 border-t border-slate-100">
+                  {prospectSectionLeads.map((lead) => {
+                    const outreach = lead.outreach_status ?? "not_contacted";
+                    return (
+                      <button
+                        key={lead.id}
+                        onClick={() => setSelectedId(lead.id)}
+                        className="w-full text-left px-4 md:px-6 py-3 hover:bg-slate-50 active:bg-slate-100 transition-colors duration-100"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="font-medium text-[#0f1c40] truncate">{lead.name}</div>
+                            {lead.business_name && <div className="text-xs text-slate-400 truncate">{lead.business_name}</div>}
+                          </div>
+                          {lead.fit_score ? (
+                            <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">Fit {lead.fit_score}/5</span>
+                          ) : null}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                          {lead.source && <SourceBadge source={lead.source} />}
+                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">
+                            {OUTREACH_STATUS_LABELS[outreach as OutreachStatus] ?? outreach}
+                          </span>
+                          {lead.follow_up_date && (
+                            <span className={`inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                              isFollowUpPastDue(lead.follow_up_date) ? "bg-red-100 text-red-600"
+                              : isFollowUpToday(lead.follow_up_date) ? "bg-amber-100 text-amber-700"
+                              : "bg-slate-100 text-slate-500"
+                            }`}>
+                              <Clock size={8} />
+                              {isFollowUpPastDue(lead.follow_up_date) ? "Overdue" : isFollowUpToday(lead.follow_up_date) ? "Due today" : formatMonthDay(lead.follow_up_date)}
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
           </div>
         </div>
 
